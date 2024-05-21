@@ -4,7 +4,6 @@ import robin_stocks.robinhood as rh
 import datetime as dt
 import time
 import option as op
-import option_position as opp
 
 def login(days):
     time_logged_in = 60*60*24*days
@@ -60,21 +59,16 @@ def is_market_open():
     return time_now > market_open and time_now < market_close
 
 def is_call_covered(short_call, short_call_quantity):
-    # Get basic short call info
-    shortCallSymbol = short_call.get_symbol()
-
     # Check if there is short call postion already
-    optionPositions = rh.options.get_open_option_positions()
-    for position in optionPositions:
-        option_info = rh.options.get_option_instrument_data_by_id(position['option_id'])
-        symbol = option_info['chain_symbol']
-        type = position['type']
-        if short_call_symbol == symbol and type == 'short':
-            return False
-        
+    optionPositions = op.OptionPosition()
+    if optionPositions.is_short_call_in_position(short_call.symbol):
+        return False
+       
+    #TODO: continue from here make the below code a method in optionPosition
     # Check if there is long call positions to cover the short call
     print('--See if there are long call positions to cover the short call...')
-    option_positions = rh.options.get_open_option_positions()
+    if optionPositions.is_long_call_in_position(shortCallSymbol):
+        return True
     for position in option_positions:
         option_info = rh.options.get_option_instrument_data_by_id(position['option_id'])
         position_symbol = option_info['chain_symbol']
@@ -134,9 +128,9 @@ def strat_open_short_call(symbol, quantity=1, risk_level='low', days_till_exp=4,
         option = op.Option(option_rh['chain_symbol'], option_rh['expiration_date'], option_rh['strike_price'], option_rh['type'])
         potentialOptions.append(option)
         print('[{0}]'.format(index + 1), 
-              'symbol:', option.get_symbol(),
-              'exp:', option.get_exp(),
-              'strike price:', option.get_strike(),
+              'symbol:', option.symbol,
+              'exp:', option.exp,
+              'strike price:', option.strike,
               'ask price:', option.get_ask_price(),
               'bid price:', option.get_bid_price(),
               'delta:', option.get_delta(),
@@ -412,8 +406,8 @@ def roll_option_ioc(old_id, new_id, position_type, quantity=1):
 def main():
     # Test roll option_ioc in closing short call strat and add ioc.
     login(days=1)
-    option_position = opp.OptionPosition()
-    option_position.print()
+    option_position = op.OptionPosition()
+    option_position.print_all_positions()
 #    
 #    option_market_info_temp = rh.get_option_market_data_by_id(option_id)
 #    option_market_info = option_market_info_temp[0]
