@@ -12,8 +12,8 @@ class Option():
         self._bid_price = 0
         self._ask_price = 0
         self._markprice = 0
-        self._delta = 0
-        self._theta = 0
+        self._delta = None
+        self._theta = None
         self.id = None # To be updated by the below method
         self.update()
 
