@@ -110,23 +110,35 @@ class OptionPosition():
                   ' average cost:', round(cost, 2),
                   ' total return:', round(total_return, 2))
 
+    # Check if there are short call option of the given symbol in current postions
     def is_short_call_in_position(self, symbol):
-        # Check if there are short call option of the given symbol in current postions
         for position in self.optionPositions:
             type = position.type
             positionType = position.get_position_type()
-            if  position.get_symbol() == symbol and type == 'call' and positionType == 'short':
+            if  position.symbol == symbol and type == 'call' and positionType == 'short':
                 return True
         
         return False
 
+    # Check if there are long call option of the given symbol in current postions
     def is_long_call_in_position(self, symbol):
-        # Check if there are long call option of the given symbol in current postions
         for position in self.optionPositions:
-            type = position.type()
+            type = position.type
             positionType = position.get_position_type()
-            if  position.get_symbol() == symbol and type == 'call' and positionType == 'long':
+            if  position.symbol == symbol and type == 'call' and positionType == 'long':
                 return True
         
         return False
+   
+    # Count how many long call positions 
+    def long_call_quantity(self, symbol):
+        for position in self.optionPositions:
+            count = 0
+            type = position.type
+            positionType = position.get_position_type()
+            if  position.symbol == symbol and type == 'call' and positionType == 'long':
+                count += abs(position.quantity)
+        
+        return count
+
         

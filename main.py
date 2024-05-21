@@ -64,18 +64,11 @@ def is_call_covered(short_call, short_call_quantity):
     if optionPositions.is_short_call_in_position(short_call.symbol):
         return False
        
-    #TODO: continue from here make the below code a method in optionPosition
     # Check if there is long call positions to cover the short call
     print('--See if there are long call positions to cover the short call...')
-    if optionPositions.is_long_call_in_position(shortCallSymbol):
-        return True
-    for position in option_positions:
-        option_info = rh.options.get_option_instrument_data_by_id(position['option_id'])
-        position_symbol = option_info['chain_symbol']
-        if short_call_symbol == position_symbol and position['type'] == 'long' and option_info['type'] == 'call':
-            if short_call_quantity <= float(position['quantity']):
-                return True
+    if short_call_quantity <= optionPositions.long_call_quantity(short_call.symbol)
 
+    #TODO: continue from here make the below code a method in optionPosition
     # Check if there is enough underlying stocks to cover the short call
     print('--See if there are enough underlying stocks to cover the short call...')
     stock_positions = rh.account.get_open_stock_positions()
