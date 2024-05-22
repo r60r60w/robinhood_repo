@@ -1,29 +1,8 @@
-import config
-
 import robin_stocks.robinhood as rh
 import datetime as dt
 import time
 import option as op
-
-def login(days):
-    time_logged_in = 60*60*24*days
-    rh.authentication.login(username=config.USERNAME,
-                            password=config.PASSWORD,
-                            expiresIn=time_logged_in,
-                            scope='internal',
-                            by_sms=True,
-                            store_session=True)
-    profile = rh.profiles.load_user_profile()
-    print('-----Logged in to account belong to:', profile['first_name'], profile['last_name'], '-----')
-
-def logout():
-    rh.authentication.logout()
-
-def get_stocks():
-    stocks = list()
-    stocks.append('NVDA')
-    stocks.append('AAPL')
-    return(stocks)
+import jh_utilities as jh_u
 
 
 def close_short_option_by_id_ioc(option_id, price, quantity=1):
@@ -46,18 +25,6 @@ def close_short_option_by_id_ioc(option_id, price, quantity=1):
     return order_info
 
 
-
-def is_market_open():
-    today_date = dt.datetime.today().date()
-    if today_date.weekday() >=5 or is_us_market_holiday(today_date): # See if today is weekend or US holiday
-        return False
-
-    time_now = dt.datetime.now().time()
-    market_open = dt.time(6,30,0) # 6:30AM PST
-    market_close = dt.time(12,55,0) # 12:55PM PST
-
-    return time_now > market_open and time_now < market_close
-
 def is_call_covered(short_call, short_call_quantity):
     # Check if there is short call postion already
     optionPositions = op.OptionPosition()
@@ -66,16 +33,17 @@ def is_call_covered(short_call, short_call_quantity):
        
     # Check if there is long call positions to cover the short call
     print('--See if there are long call positions to cover the short call...')
-    if short_call_quantity <= optionPositions.long_call_quantity(short_call.symbol)
+    if short_call_quantity > optionPositions.long_call_quantity(short_call.symbol):
+        return False
 
-    #TODO: continue from here make the below code a method in optionPosition
+    #TODO: Make the below code a method in optionPosition
     # Check if there is enough underlying stocks to cover the short call
     print('--See if there are enough underlying stocks to cover the short call...')
     stock_positions = rh.account.get_open_stock_positions()
     for position in stock_positions:
         stock_info = rh.stocks.get_stock_quote_by_id(position['instrument_id'])
         position_symbol = stock_info['symbol']
-        if short_call_symbol == position_symbol:
+        if short_call.symbol == position_symbol:
             position_shares = float(position['shares_available_for_exercise'])
             if short_call_quantity*100 <= position_shares:
                 return True
@@ -157,9 +125,10 @@ def strat_open_short_call(symbol, quantity=1, risk_level='low', days_till_exp=4,
         return 
 
     # Calculate limit price
-    limit_price = round((float(selected_option['ask_price']) + float(selected_option['bid_price'])) / 2, 2)
+    limit_price = (selectedOption.get_bid_price() + selectedOption.get_ask_price())/2
     print('Opening a limit order to sell at ${0}...'.format(limit_price))
 
+    #TODO: Contunue from here, think about how to wrap sell_option
     # Place sell order
     order_info = rh.order_sell_option_limit(
         positionEffect='open',
@@ -256,12 +225,12 @@ def run_covered_call(symbol_list, quantity=1, risk_level='low', chance_of_profit
     exp_date = today_date + dt.timedelta(-1) # Should be -1 in mission mode
     if True:
 #    if today_date.strftime("%A") == 'Monday' and is_market_open():
-        if is_us_market_holiday(today_date):
+        if jh_u.is_us_market_holiday(today_date):
             print("This week's Monday falls on a US holiday. Exiting CC.")
             return 
         days_till_exp = 4; # THis will select Friday as exp date.
         exp_date = today_date + dt.timedelta(days_till_exp)
-        if is_us_market_holiday(exp_date):
+        if jh_u.is_us_market_holiday(exp_date):
             days_till_exp -= 1
             exp_date = today_date + dt.timedelta(days_till_exp)
 
@@ -306,28 +275,6 @@ def run_covered_call(symbol_list, quantity=1, risk_level='low', chance_of_profit
         time.sleep(30)
 
 
-def is_us_market_holiday(date):
-    # List of recognized US market holidays
-    us_market_holidays = [
-        dt.datetime(date.year, 1, 1).date(),
-        # Martin Luther King Jr. Day - Third Monday in January
-        dt.datetime(date.year, 1, 15).date() if date.year == 2024 else None,  # Adjust for the current year
-        # Presidents' Day - Third Monday in February
-        dt.datetime(date.year, 2, 19).date() if date.year == 2024 else None,  # Adjust for the current year
-        # Good Friday - Friday before Easter Sunday (not a federal holiday, but many stock exchanges close early)
-        dt.datetime(date.year, 3, 29).date() if date.year == 2024 else None,  # Adjust for the current year
-        # Memorial Day - Last Monday in May
-        dt.datetime(date.year, 5, 27).date() if date.year == 2024 else None,  # Adjust for the current year
-        # Independence Day - July 4th
-        dt.datetime(date.year, 7, 4).date(),
-        # Labor Day - First Monday in September
-        dt.datetime(date.year, 9, 2).date() if date.year == 2024 else None,  # Adjust for the current year
-        # Thanksgiving Day - Fourth Thursday in November
-        dt.datetime(date.year, 11, 28).date() if date.year == 2024 else None,  # Adjust for the current year
-        # Christmas Day - December 25th
-        dt.datetime(date.year, 12, 25).date()
-    ]
-    return date in us_market_holidays
 
 #TODO: Add ioc to function, and test this function
 def roll_option_ioc(old_id, new_id, position_type, quantity=1):
@@ -398,7 +345,7 @@ def roll_option_ioc(old_id, new_id, position_type, quantity=1):
 
 def main():
     # Test roll option_ioc in closing short call strat and add ioc.
-    login(days=1)
+    jh_u.login(days=1)
     option_position = op.OptionPosition()
     option_position.print_all_positions()
 #    
@@ -408,27 +355,12 @@ def main():
 #    ask_price = float(option_market_info['ask_price'])
 #    limit_price = round((bid_price + ask_price)/2-0.2, 2) 
 #    print(limit_price)
-    roll_option_ioc(option_id, "new_id", "long")
-    leg1 = {"expirationDate":"2024-09-20",
-            "strike":"150.00",
-            "optionType":"call",
-            "effect":"close",
-            "action":"sell"}
-
-    leg2 = {"expirationDate":"2024-09-20",
-            "strike":"160.00",
-            "optionType":"call",
-            "effect":"open",
-            "action":"buy"}
-
-    spread = [leg1,leg2]
-    #!!!
 
  #   order_info = close_short_option_by_id(option_id, limit_price, 1)
 #    order_id = order_info['id']
  
-    cc_symbol_list = ['MSFT']
-    run_covered_call(cc_symbol_list, quantity=1, risk_level='low', chance_of_profit=0.9)
+#    cc_symbol_list = ['MSFT']
+#    run_covered_call(cc_symbol_list, quantity=1, risk_level='low', chance_of_profit=0.9)
 #    order_info = strat_open_short_call('AAPL', risk_level='low', days_till_exp=4, quantity=1)
 #    if order_info == None:
 #        print('No open short call order.')

@@ -70,6 +70,10 @@ class Option():
 class OptionPosition():
     def __init__(self):
         self.optionPositions = []
+        self.update()
+        
+    def update(self):
+        self.optionPositions = []
         optionPositions_rh = rh.options.get_open_option_positions()
         for position in optionPositions_rh:
             option_rh = rh.options.get_option_instrument_data_by_id(position['option_id'])
@@ -83,7 +87,12 @@ class OptionPosition():
                 option.quantity = quantity
             self.optionPositions.append(option)
 
+    def get_all_positions(self):
+        self.update()
+        return self.optionPositions
+
     def print_all_positions(self):
+        self.update()
         # Print header
         print('---- Current Option Positions ----')
 
@@ -112,6 +121,7 @@ class OptionPosition():
 
     # Check if there are short call option of the given symbol in current postions
     def is_short_call_in_position(self, symbol):
+        self.update()
         for position in self.optionPositions:
             type = position.type
             positionType = position.get_position_type()
@@ -122,6 +132,7 @@ class OptionPosition():
 
     # Check if there are long call option of the given symbol in current postions
     def is_long_call_in_position(self, symbol):
+        self.update()
         for position in self.optionPositions:
             type = position.type
             positionType = position.get_position_type()
@@ -132,8 +143,9 @@ class OptionPosition():
    
     # Count how many long call positions 
     def long_call_quantity(self, symbol):
+        self.update()
+        count = 0
         for position in self.optionPositions:
-            count = 0
             type = position.type
             positionType = position.get_position_type()
             if  position.symbol == symbol and type == 'call' and positionType == 'long':
