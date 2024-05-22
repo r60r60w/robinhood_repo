@@ -3,6 +3,7 @@ import datetime as dt
 import time
 import option as op
 import jh_utilities as jh_u
+import jh_wrapper as jh_w
 
 
 def close_short_option_by_id_ioc(option_id, price, quantity=1):
@@ -33,8 +34,8 @@ def is_call_covered(short_call, short_call_quantity):
        
     # Check if there is long call positions to cover the short call
     print('--See if there are long call positions to cover the short call...')
-    if short_call_quantity > optionPositions.long_call_quantity(short_call.symbol):
-        return False
+    if short_call_quantity <= optionPositions.long_call_quantity(short_call.symbol):
+        return True
 
     #TODO: Make the below code a method in optionPosition
     # Check if there is enough underlying stocks to cover the short call
@@ -51,12 +52,12 @@ def is_call_covered(short_call, short_call_quantity):
     return False
 
 
-def strat_open_short_call(symbol, quantity=1, risk_level='low', days_till_exp=4, chance_of_profit=0.9):
-    print('---- Executing Covered Call Selling Strategy for', symbol, 'with', days_till_exp, 'Days till Expiration ----')
+def strat_open_short_call(symbol, quantity=1, risk_level='low', dte=4, chance_of_profit=0.9):
+    print('---- Executing Covered Call Selling Strategy for', symbol, 'with', dte, 'Days till Expiration ----')
     print('Your selected risk level is:', risk_level)
     
     # Calculate expiration date
-    exp = dt.datetime.now().date() + dt.timedelta(days=days_till_exp) 
+    exp = dt.datetime.now().date() + dt.timedelta(days=dte) 
     exp_str = exp.strftime('%Y-%m-%d')
     
     # Define profit floor and ceiling
@@ -195,21 +196,21 @@ def strat_close_short_call(short_option_id, quantity=1):
     return_pcnt = round(return_rate * 100, 2)
     expiration_date = dt.datetime.strptime(short_option_info['expiration_date'], "%Y-%m-%d").date()
 
-    days_till_exp = expiration_date - dt.datetime.now().date()
+    dte = expiration_date - dt.datetime.now().date()
     print('Return percentage now is {0}%'.format(return_pcnt))
     if return_rate < 0:
         print('Pay attention to negative return percentage.')
-        if days_till_exp.days <= 2:
+        if dte.days <= 2:
             print('There is less than 2 days left till expiration. Watch for assignment risk!!!')
             #TODO: Start from here
             status = roll_option_ioc(short_option_id, "new_option_id", "short", quantity)
     elif return_rate > 0.7:
-        if days_till_exp.days >= 3:
+        if dte.days >= 3:
             print('Return rate is higher than 0.7 with at least 3 days till expiration.')
             print("Closing the short position prematurely to prevent risk.")
             status = close_short_option_by_id_ioc(short_option_id, limit_price, quantity)
     elif return_rate > 0.9:
-        if days_till_exp.days <= 2:
+        if dte.days <= 2:
             print('Return rate is higher than 0.9 with less than 2 days till expiration.')
             print("Closing the short position prematurely to prevent risk.")
             status = close_short_option_by_id_ioc(short_option_id, limit_price, quantity)
@@ -228,11 +229,11 @@ def run_covered_call(symbol_list, quantity=1, risk_level='low', chance_of_profit
         if jh_u.is_us_market_holiday(today_date):
             print("This week's Monday falls on a US holiday. Exiting CC.")
             return 
-        days_till_exp = 4; # THis will select Friday as exp date.
-        exp_date = today_date + dt.timedelta(days_till_exp)
+        dte = 4; # THis will select Friday as exp date.
+        exp_date = today_date + dt.timedelta(dte)
         if jh_u.is_us_market_holiday(exp_date):
-            days_till_exp -= 1
-            exp_date = today_date + dt.timedelta(days_till_exp)
+            dte -= 1
+            exp_date = today_date + dt.timedelta(dte)
 
         # Wait for 30 minutes after market opens to place order
         #time.sleep(1800)
@@ -243,7 +244,7 @@ def run_covered_call(symbol_list, quantity=1, risk_level='low', chance_of_profit
         trial_count = 0
         while trial_count < 2:
             for symbol in symbol_list:
-                short_call_order_info = strat_open_short_call(symbol, quantity, risk_level, days_till_exp, chance_of_profit)
+                short_call_order_info = strat_open_short_call(symbol, quantity, risk_level, dte, chance_of_profit)
                 if short_call_order_info != None:
                     short_call_order_info_list.append(short_call_order_info) 
             time.sleep(3)
@@ -361,7 +362,7 @@ def main():
  
 #    cc_symbol_list = ['MSFT']
 #    run_covered_call(cc_symbol_list, quantity=1, risk_level='low', chance_of_profit=0.9)
-#    order_info = strat_open_short_call('AAPL', risk_level='low', days_till_exp=4, quantity=1)
+#    order_info = strat_open_short_call('AAPL', risk_level='low', dte=4, quantity=1)
 #    if order_info == None:
 #        print('No open short call order.')
 #        return

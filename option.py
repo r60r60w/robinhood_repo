@@ -31,6 +31,18 @@ class Option():
         self._theta = round(float(option_rh['theta']), 4)
         self.id = option_rh['id']
 
+    def print(self):
+        self.update()
+        print('symbol:', self.symbol,
+              ' type:', self.type,
+              ' exp:', self.exp,
+              ' strike price:', self.strike,
+              ' quantity:', self.quantity,
+              ' current price:', self.get_mark_price(),
+              ' delta:', self.get_delta(),
+              ' theta:', self.get_theta())
+       
+
     def get_position_type(self):
         if self.quantity > 0:
             return 'long'
@@ -152,5 +164,3 @@ class OptionPosition():
                 count += abs(position.quantity)
         
         return count
-
-        
