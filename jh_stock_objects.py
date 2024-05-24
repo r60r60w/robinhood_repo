@@ -1,5 +1,9 @@
 import datetime as dt
 import robin_stocks.robinhood as rh
+import logging
+from jh_utilities import EmptyListError
+
+logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 
 class Option():
     def __init__(self, symbol, exp, strike, type):
@@ -17,13 +21,23 @@ class Option():
         self.id = None # To be updated by the below method
         self.update()
 
-    def update(self):
+    def get_option_rh(self): 
         options_rh = rh.options.find_options_by_expiration_and_strike(self.symbol, self.exp, self.strike, self.type)
-        if len(options_rh) == 0:
-            option_rh = None
+        if not options_rh:
+            raise EmptyListError()
+
+        return options_rh
+
+    def update(self):
+        try:
+            options_rh = self.get_option_rh()
+            
+        except EmptyListError as e:
+            logging.error(f"No option found: {e}")
             return
         else:
             option_rh = options_rh[0]
+
         self._ask_price = round(float(option_rh['ask_price']), 2)
         self._bid_price = round(float(option_rh['bid_price']), 2)
         self._mark_price = round(float(option_rh['bid_price']), 2)
@@ -42,14 +56,28 @@ class Option():
               ' delta:', self.get_delta(),
               ' theta:', self.get_theta())
        
-
+    
     def get_position_type(self):
+        """Return the position type in 1 or -1, where 1 is for long and -1 for short
+
+        Returns:
+            integer: 1 or -1
+        """
+        if self.quantity > 0:
+            return 1
+        elif self.quantity < 0:
+            return -1
+        else:
+            return 0
+
+    def get_position_type_str(self):
         if self.quantity > 0:
             return 'long'
         elif self.quantity < 0:
             return 'short'
         else:
-            return 'None'
+            return ''
+
 
     def get_exp_dt(self):
         return dt.datetime.strptime(self.exp, "%Y-%m-%d") 
@@ -102,7 +130,7 @@ class OptionPosition():
     def get_all_positions(self):
         self.update()
         return self.optionPositions
-
+    
     def print_all_positions(self):
         self.update()
         # Print header
@@ -112,15 +140,14 @@ class OptionPosition():
         for position in self.optionPositions:
             # Retrieve current market price
             current_price = position.get_mark_price()
-            current_price = -1*current_price if position.get_position_type() == "short" else current_price
+            current_price = current_price * position.get_position_type()
             # Calculate total return
             cost = position.cost 
             total_return = current_price * 100 - cost
 
             # Print option position details
-            print(position.get_id())
             print('symbol:', position.symbol,
-                  ' type:', position.get_position_type(), position.type,
+                  ' type:', position.get_position_type_str(), position.type,
                   ' exp:', position.exp,
                   ' strike price:', position.strike,
                   ' quantity:', position.quantity,
@@ -136,7 +163,7 @@ class OptionPosition():
         self.update()
         for position in self.optionPositions:
             type = position.type
-            positionType = position.get_position_type()
+            positionType = position.get_position_type_str()
             if  position.symbol == symbol and type == 'call' and positionType == 'short':
                 return True
         
@@ -147,19 +174,19 @@ class OptionPosition():
         self.update()
         for position in self.optionPositions:
             type = position.type
-            positionType = position.get_position_type()
+            positionType = position.get_position_type_str()
             if  position.symbol == symbol and type == 'call' and positionType == 'long':
                 return True
         
         return False
    
-    # Count how many long call positions 
+    # Count how many long call positions of given symbol 
     def long_call_quantity(self, symbol):
         self.update()
         count = 0
         for position in self.optionPositions:
             type = position.type
-            positionType = position.get_position_type()
+            positionType = position.get_position_type_str()
             if  position.symbol == symbol and type == 'call' and positionType == 'long':
                 count += abs(position.quantity)
         

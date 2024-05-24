@@ -1,9 +1,11 @@
 import robin_stocks.robinhood as rh
 import datetime as dt
 import time
-import option as op
 import jh_utilities as jh_u
 import jh_wrapper as jh_w
+import logging
+from jh_stock_objects import Option
+from jh_stock_objects import OptionPosition
 
 
 def close_short_option_by_id_ioc(option_id, price, quantity=1):
@@ -28,7 +30,7 @@ def close_short_option_by_id_ioc(option_id, price, quantity=1):
 
 def is_call_covered(short_call, short_call_quantity):
     # Check if there is short call postion already
-    optionPositions = op.OptionPosition()
+    optionPositions = OptionPosition()
     if optionPositions.is_short_call_in_position(short_call.symbol):
         return False
        
@@ -52,7 +54,7 @@ def is_call_covered(short_call, short_call_quantity):
     return False
 
 
-def strat_open_short_call(symbol, quantity=1, risk_level='low', dte=4, chance_of_profit=0.9):
+def strat_open_short_call(symbol, quantity=1, risk_level='low', dte=4, delta=0.2):
     print('---- Executing Covered Call Selling Strategy for', symbol, 'with', dte, 'Days till Expiration ----')
     print('Your selected risk level is:', risk_level)
     
@@ -87,7 +89,7 @@ def strat_open_short_call(symbol, quantity=1, risk_level='low', dte=4, chance_of
     potentialOptions_rh = sorted(potentialOptions_rh, key=lambda x: x['strike_price'])
     potentialOptions = []
     for index, option_rh in enumerate(potentialOptions_rh):
-        option = op.Option(option_rh['chain_symbol'], option_rh['expiration_date'], option_rh['strike_price'], option_rh['type'])
+        option = Option(option_rh['chain_symbol'], option_rh['expiration_date'], option_rh['strike_price'], option_rh['type'])
         potentialOptions.append(option)
         print('[{0}]'.format(index + 1), 
               'symbol:', option.symbol,

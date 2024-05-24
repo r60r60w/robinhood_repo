@@ -1,6 +1,6 @@
 import datetime as dt
 import robin_stocks.robinhood as rh
-import option as op
+import jh_stock_objects as jh_o
 
 def find_options_by_delta(symbol, exp, type, delta_min, delta_max):
     """
@@ -29,7 +29,7 @@ def find_options_by_delta(symbol, exp, type, delta_min, delta_max):
         
         # Check if the delta is within the specified range
         if delta_min <= delta <= delta_max:
-            option = op.Option(symbol, option_rh['expiration_date'], float(option_rh['strike_price']), option_rh['type'])
+            option = jh_o.Option(symbol, option_rh['expiration_date'], float(option_rh['strike_price']), option_rh['type'])
             matching_options.append(option)
     
     return matching_options

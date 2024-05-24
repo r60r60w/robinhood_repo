@@ -50,3 +50,9 @@ def is_us_market_holiday(date):
         dt.datetime(date.year, 12, 25).date()
     ]
     return date in us_market_holidays
+
+class EmptyListError(Exception):
+    """Exception raised for errors in the input list being empty."""
+    def __init__(self, message="List is empty"):
+        self.message = message
+        super().__init__(self.message)
