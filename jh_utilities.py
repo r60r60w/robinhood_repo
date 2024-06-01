@@ -1,7 +1,13 @@
 import robin_stocks.robinhood as rh
-import robin_stocks.robinhood as rh
 import datetime as dt
 import config
+
+
+class EmptyListError(Exception):
+    """Exception raised for errors in the input list being empty."""
+    def __init__(self, message="List is empty"):
+        self.message = message
+        super().__init__(self.message)
 
 def login(days):
     time_logged_in = 60*60*24*days
@@ -51,8 +57,28 @@ def is_us_market_holiday(date):
     ]
     return date in us_market_holidays
 
-class EmptyListError(Exception):
-    """Exception raised for errors in the input list being empty."""
-    def __init__(self, message="List is empty"):
-        self.message = message
-        super().__init__(self.message)
+def print_with_time(*args, **kwargs):
+    # Get the current time
+    current_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    
+    # Join all positional arguments into a single string
+    message = ' '.join(map(str, args))
+    
+    # Print the message with the current time, passing all keyword arguments to print
+    print(f"{current_time} - {message}", **kwargs)
+
+def get_2nd_next_friday():
+    # Get today's date
+    today = dt.datetime.today().date()
+
+    # Find the next Friday
+    days_ahead = 4 - today.weekday()  # weekday() returns 0 for Monday, ..., 6 for Sunday
+    if days_ahead <= 0:  # Target day already passed this week
+        days_ahead += 7
+    next_friday = today + dt.timedelta(days=days_ahead)
+
+    # Find the 2nd next Friday (which is 2 weeks after the next Friday)
+    second_next_friday = next_friday + dt.timedelta(weeks=1)
+
+    return second_next_friday
+
