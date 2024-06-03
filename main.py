@@ -7,13 +7,19 @@ from jh_utilities import *
 from jh_optionTrader import *
 
 
+'''TODO:
+1. Reduce unnecessary updates
+2. close_short_call(): closing logic changed to option moneyness.
+'''
 def main():
     # Test roll option_ioc in closing short call strat and add ioc.
     login(days=1)
     mode = 'test'
     trader = OptionTrader(['AAPL', 'MSFT'], mode)
-    trader.print_all_positions()
-    trader.run_cc('low')
+#    optionPositions = OptionPosition()
+#    optionPositions.print_all_positions()
+#    trader.print_all_positions()
+    trader.run_cc('low', MAX_ATTEMPT=0)
 #    option_position = op.OptionPosition()
 #    option_position.print_all_positions()
 #    

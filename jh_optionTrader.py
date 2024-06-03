@@ -19,7 +19,7 @@ class OptionTrader():
         orders_rh = rh.orders.get_all_open_option_orders()
         print(orders_rh)
         
-    def run_cc(self, risk_level='low', delta=0.2):
+    def run_cc(self, risk_level='low', delta=0.2, MAX_ATTEMPT=3):
         # Opening covered call position
         # Determine if today is Monday
         print_with_time('-----Running covered call strategy:-----')
@@ -29,23 +29,18 @@ class OptionTrader():
         shortCallOrder_rh_list = []
         todayDate_dt = dt.datetime.today().date()
         exp_dt = get_2nd_next_friday()
-        if todayDate_dt.strftime("%A") == 'Monday' and is_market_open() or self.mode == 'test':
-            if is_us_market_holiday(todayDate_dt):
-                print("This week's Monday falls on a US holiday. Exiting CC.")
-                return 
-            if is_us_market_holiday(exp_dt):
+        if todayDate_dt.strftime("%A") == 'Monday' and is_market_open_now() or self.mode == 'test':
+            if not is_market_open_on_date(exp_dt):
                 # If expiration date is a holiday, push to next week's Friday
                 exp_dt = todayDate_dt + dt.timedelta(weeks=1)
 
-            dte = exp_dt - todayDate_dt
+            dte = (exp_dt - todayDate_dt).days
             # Wait for 30 minutes after market opens to place order
-            if self.mode != 'test':
-                time.sleep(1800)
+            time.sleep(1800) if self.mode != 'test' else time.sleep(0)
 
             # Place short call order for each symbol in the symbol list
             # Attempt to place limit order based on mid bid-ask price.
             # If order not filled in x minutes, cancel the orders and place again for <trial_count> times.
-            MAX_ATTEMPT = 3
             attempt = 0
             print_with_time('Placing short call orders in {0} attempts'.format(MAX_ATTEMPT))
             while attempt < MAX_ATTEMPT:
@@ -54,33 +49,30 @@ class OptionTrader():
                     shortCallOrder_rh = self.open_short_call(symbol, dte, risk_level, delta, quantity=1)
                     if shortCallOrder_rh != None:
                         shortCallOrder_rh_list.append(shortCallOrder_rh) 
-                time.sleep(3)
-                pendingOrders = rh.orders.get_all_open_option_orders()
-                if len(pendingOrders) == 0: break
+                time.sleep(300) if self.mode != 'test' else time.sleep(0)
+                pendingOrders_rh = rh.orders.get_all_open_option_orders()
+                if len(pendingOrders_rh) == 0: break
                 for shortCallOrder_rh in shortCallOrder_rh_list:
-                    for pendingOrder in pendingOrders:
-                        if shortCallOrder_rh['id'] == pendingOrder['id']:
-                            rh.orders.cancel_option_order(pendingOrder['id'])
+                    for pendingOrder_rh in pendingOrders_rh:
+                        if shortCallOrder_rh['id'] == pendingOrder_rh['id']:
+                            rh.orders.cancel_option_order(pendingOrder_rh['id'])
                 attempt += 1
 
         # Closing cc based on strategy    
         # Filter open short call positions in current open option positions 
-        shortCalls = []
         while dt.datetime.today().date() <= exp_dt: 
+            shortCalls = []
             # Add any newly open short calls to option_id_list
             positions = OptionPosition()
             for position in positions.optionPositions:
-                if position.type == 'short' and position not in shortCalls:
+                if position.type == 'call' and position.get_position_type_str() == 'short' and position not in shortCalls:
                     shortCalls.append(position)
 
-            if is_market_open() == True and self.mode != 'test':
+            if is_market_open_now() or self.mode == 'test':
                 for option in shortCalls:
                     self.close_short_call(option, quantity=1)
             # Run closing strategy every 30 seconds.
-            if self.mode != 'test':
-                time.sleep(30)
-            else:
-                time.sleep(3)
+            time.sleep(30) if self.mode != 'test' else time.sleep(0)
 
     def open_short_call(self, symbol, dte, risk_level="low", delta=0.2, quantity=1):
         print_with_time('---- Openning short call for', symbol, 'with', dte, 'Days till Expiration ----')
@@ -90,7 +82,7 @@ class OptionTrader():
         exp = exp_dt.strftime('%Y-%m-%d')
 
         # Define profit floor and ceiling
-        delta_min = 0.025
+        delta_min = 0.03
         delta_max = delta if delta > delta_min else delta_min+0.005
         print_with_time('Looking for options with delta between {0} and {1}, expiring'.format(delta_min, delta_max), exp)
 
@@ -104,7 +96,7 @@ class OptionTrader():
         # Print potential options
         print_with_time('Found these options matching criteria:')
         for index, option in enumerate(potentialOptions):
-            print('[{0}]'.format(index+1), end='')
+            print('[{0}] '.format(index+1), end='')
             option.print()
 
         # Select option based on risk level
@@ -131,7 +123,7 @@ class OptionTrader():
             return None
 
         # Calculate limit price
-        limit_price = round((selectedOption.get_bid_price() + selectedOption.get_ask_price())/2, 2)
+        limit_price = selectedOption.get_limit_price()
         print_with_time('Opening a limit order to sell at ${0}...'.format(limit_price))
 
         #TODO: Contunue from here, think about how to wrap sell_option
@@ -158,13 +150,11 @@ class OptionTrader():
 
     def close_short_call(self, option_to_close, quantity=1):
         status = None
-        bid_price = option_to_close.get_bid_price()
-        ask_price = option_to_close.get_ask_price()
-        limit_price = round((bid_price + ask_price)/2, 2)
+        limit_price = option_to_close.get_limit_price()
         print_with_time('---Closing short call with',
             'symbol:', option_to_close.symbol,
             'exp:', option_to_close.exp,
-            'strike price:', option_to_close.exp)
+            'strike:', option_to_close.strike)
 
         # Check if the short call exists in open positions
         optionPositions = OptionPosition()
@@ -184,30 +174,32 @@ class OptionTrader():
             return status
         
         cost = option_to_close.cost
-        price = option_to_close.get_mark_price()
+        price = option_to_close.get_mark_price() * option_to_close.get_position_type()
         total_return = price * 100 - cost
         return_rate = total_return/abs(cost)       
         return_pcnt = round(return_rate * 100, 2)
         dte = (option_to_close.get_exp_dt().date() - dt.datetime.now().date()).days
+        strike = option_to_close.strike
+        stockPrice = float(rh.stocks.get_latest_price(option_to_close.symbol)[0])
         print_with_time('Return percentage now is {0}%'.format(return_pcnt))
 
         # Closing logic
-        if return_rate < 0:
-            print('Pay attention to negative return percentage.')
-            if dte < 2 and return_rate < -0.025:
-                print_with_time('There is less than 2 days left till expiration. ')
+        if strike < stockPrice:
+            print_with_time('Stock price now at: {0}. This call is currently in the money!'.format(stockPrice))
+            if dte <= 1 and strike < stockPrice - 5 or self.mode == 'test':
+                print_with_time('There is less than 2 days left till expiration. Rolling option to prevent assignment risk. ')
                 option_to_roll = option_to_close.find_option_to_roll(dte_delta=7, price_ratio=1.1)
-                status = option_to_close.roll_option_ioc(option_to_roll, 'short', quantity)
-        elif return_rate > 0.7:
-            if dte >= 3:
-                print('Return rate is higher than 0.7 with at least 3 days till expiration.')
+                status = option_to_close.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
+        elif return_rate > 0.70:
+            if dte >= 5:
+                print_with_time('Return rate is higher than 0.7 with at least {0} days till expiration.'.format(dte))
                 print("Closing the short position prematurely to prevent risk.")
-                status = close_short_option_ioc(option_to_close, limit_price, quantity)
+                status = close_short_option_ioc(option_to_close, limit_price, quantity, mode=self.mode)
         elif return_rate > 0.9:
             if dte <= 2:
-                print('Return rate is higher than 0.9 with less than 2 days till expiration.')
+                print('Return rate is higher than 0.9 with no more than {0} days till expiration.'.format(dte))
                 print("Closing the short position prematurely to prevent risk.")
-                status = close_short_option_ioc(option_to_close, limit_price, quantity)
+                status = close_short_option_ioc(option_to_close, limit_price, quantity, mode=self.mode)
         return status
     
 

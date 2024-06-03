@@ -94,6 +94,10 @@ class Option():
     def get_bid_price(self):
         self.update()
         return self._bid_price
+    
+    def get_limit_price(self, price_ratio=0.5):
+        self.update()
+        return round(self._bid_price + price_ratio * (self._ask_price - self._bid_price), 2)
 
     def get_mark_price(self):
         self.update()
@@ -133,7 +137,7 @@ class Option():
         new_option_rh = min(options_rh, key=lambda x: abs(float(x['mark_price']) - new_price))
         return Option(self.symbol, new_exp, float(new_option_rh['strike_price']), self.type)
 
-    def roll_option_ioc(self, new_option, position_type, quantity=1):
+    def roll_option_ioc(self, new_option, position_type, quantity=1, mode='normal'):
         # Check if this option (self) is in position
         optionPositions = OptionPosition()
         old_option = optionPositions.find_and_update_option(self)
@@ -151,14 +155,8 @@ class Option():
             print("The two options are not of the same type. Need to be the same type for rolling.")
             return None
 
-        old_bid_price = old_option.get_bid_price()
-        old_ask_price = old_option.get_ask_price()
-        old_limit_price = round((old_bid_price + old_ask_price)/2, 2) 
-
-        new_bid_price = new_option.get_bid_price()
-        new_ask_price = new_option.get_ask_price()
-        new_limit_price = round((new_bid_price + new_ask_price)/2, 2) 
-
+        old_limit_price = old_option.get_limit_price()
+        new_limit_price = new_option.get_limit_price()
 
         if position_type == "long":
             price = new_limit_price - old_limit_price
@@ -188,14 +186,14 @@ class Option():
 
 
         spread = [leg1,leg2]
-        order_rh = rh.orders.order_option_spread(debitOrCredit, price, new_option.symbol, quantity, spread)
+        order_rh = rh.orders.order_option_spread(debitOrCredit, abs(price), new_option.symbol, quantity, spread)
         print(order_rh)
         if len(order_rh) != 35:
              print_with_time('Failed to place order.')
              return order_rh
         
         # Cancel order after waiting for 2 min 
-        time.sleep(120)
+        time.sleep(120) if mode != 'test' else time.sleep(0)
         pendingOrders = rh.orders.get_all_open_option_orders()
         for pendingOrder in pendingOrders:
             if order_rh['id'] == pendingOrder['id']:
@@ -217,27 +215,24 @@ class OptionPosition():
             option_rh = rh.options.get_option_instrument_data_by_id(position['option_id'])
             option = Option(option_rh['chain_symbol'], option_rh['expiration_date'], float(option_rh['strike_price']), option_rh['type'])
             quantity = float(position['quantity'])
-            option.cost = self.calculate_option_cost(option)
             if position['type'] == 'short':
                 option.quantity = -1*quantity
             elif position['type'] == 'long':
                 option.quantity = quantity
+            option.cost = self.calculate_option_cost(option)
             self.optionPositions.append(option)
 
     def get_all_positions(self):
-        self.update()
         return self.optionPositions
     
     def print_all_positions(self):
-        self.update()
         # Print header
         print('---- Current Option Positions ----')
 
         # Iterate over each option position
         for position in self.optionPositions:
             # Retrieve current market price
-            current_price = position.get_mark_price()
-            current_price = current_price * position.get_position_type()
+            current_price = position.get_mark_price() * position.get_position_type()
             # Calculate total return
             cost = position.cost 
             total_return = current_price * 100 - cost
@@ -256,12 +251,6 @@ class OptionPosition():
                   ' total return:', round(total_return, 2))
 
     def calculate_option_cost(self, option, verbose=False):  
-        self.update()
-        option = self.find_and_update_option(option)
-        if option is None:
-            print_with_time('The option is not in current open positions.')
-            return None
-        
         symbol = option.symbol
         exp = option.exp
         strike = option.strike
@@ -337,7 +326,6 @@ class OptionPosition():
             _type_: returns None if no option found in position.
                     returns an Option object with cost and quantity updated accroding to position.
         """
-        self.update()
         for position in self.optionPositions:
             if position.get_id() == option.get_id():
                 return position
@@ -346,7 +334,6 @@ class OptionPosition():
 
     # Check if there are short call option of the given symbol in current postions
     def is_short_call_in_position(self, symbol):
-        self.update()
         for position in self.optionPositions:
             type = position.type
             positionType = position.get_position_type_str()
@@ -357,7 +344,6 @@ class OptionPosition():
 
     # Check if there are long call option of the given symbol in current postions
     def is_long_call_in_position(self, symbol):
-        self.update()
         for position in self.optionPositions:
             type = position.type
             positionType = position.get_position_type_str()
@@ -368,7 +354,6 @@ class OptionPosition():
    
     # Count how many long call positions of given symbol 
     def long_call_quantity(self, symbol):
-        self.update()
         count = 0
         for position in self.optionPositions:
             type = position.type
@@ -432,7 +417,7 @@ def is_option_in_open_orders(option):
 #for option in options_sorted:
 #    option.print()
 
-def close_short_option_ioc(option_to_close, price, quantity=1):
+def close_short_option_ioc(option_to_close, price, quantity=1, mode='normal'):
     symbol = option_to_close.symbol
     exp_date = option_to_close.exp
     strike_price = option_to_close.strike 
@@ -444,7 +429,7 @@ def close_short_option_ioc(option_to_close, price, quantity=1):
         return order_rh
 
     # Cancel order after waiting for 2 min 
-    time.sleep(120)
+    time.sleep(120) if mode !='test' else time.sleep(0)
     pendingOrders = rh.orders.get_all_open_option_orders()
     for pendingOrder in pendingOrders:
         if order_rh['id'] == pendingOrder['id']:
@@ -462,6 +447,7 @@ def is_call_covered(short_call, short_call_quantity):
        
     # Check if there is long call positions to cover the short call
     print('--See if there are long call positions to cover the short call...')
+    optionPositions.update()
     if short_call_quantity <= optionPositions.long_call_quantity(short_call.symbol):
         return True
 

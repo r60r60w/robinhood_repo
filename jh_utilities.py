@@ -23,11 +23,16 @@ def login(days):
 def logout():
     rh.authentication.logout()
 
-def is_market_open():
-    today_date = dt.datetime.today().date()
-    if today_date.weekday() >=5 or is_us_market_holiday(today_date): # See if today is weekend or US holiday
-        return False
+def is_market_open_on_date(date_dt):
+    date = date_dt.strftime('%Y-%m-%d')
+    marketHour_rh = rh.markets.get_market_hours('XNYS', date)
+    return marketHour_rh['is_open']
 
+def is_market_open_now():
+    today_date_dt = dt.datetime.today().date()
+    if not is_market_open_on_date(today_date_dt):
+        return False
+    
     time_now = dt.datetime.now().time()
     market_open = dt.time(6,30,0) # 6:30AM PST
     market_close = dt.time(12,55,0) # 12:55PM PST
