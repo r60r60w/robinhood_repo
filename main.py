@@ -9,7 +9,7 @@ logger = get_logger(__name__)
 
 #%%
 symbol = 'GOOGL'
-
+# This comment is to test GIT.
 #%%
 '''TODO:
  1. How to let run_cc run in a loop
