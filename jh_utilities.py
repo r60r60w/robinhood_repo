@@ -1,6 +1,26 @@
 import robin_stocks.robinhood as rh
 import datetime as dt
 import config
+import logging
+
+
+# Configure logging settings
+logging.basicConfig(
+    format='[%(asctime)s] {%(filename)s:%(lineno)d} %(levelname)s - %(message)s',
+    level=logging.INFO
+)
+
+# Define a function to get a logger
+def get_logger(name: str) -> logging.Logger:
+    """Get a logger with the specified name."""
+    logger = logging.getLogger(name)
+    # Ensuring that logger only has handlers set once to prevent duplicate logs
+    if not logger.handlers:
+        # Optional: Add other handlers if needed, e.g., a file handler
+        # file_handler = logging.FileHandler("app.log")
+        # logger.addHandler(file_handler)
+        pass
+    return logger
 
 
 class EmptyListError(Exception):
@@ -62,15 +82,23 @@ def is_us_market_holiday(date):
     ]
     return date in us_market_holidays
 
-def print_with_time(*args, **kwargs):
+def print_with_time(*args, file=None, **kwargs):
     # Get the current time
     current_time = dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
     
     # Join all positional arguments into a single string
     message = ' '.join(map(str, args))
     
+    # Construct the final message with the current time
+    final_message = f"{current_time} - {message}"
+    
     # Print the message with the current time, passing all keyword arguments to print
-    print(f"{current_time} - {message}", **kwargs)
+    print(final_message, **kwargs)
+    
+    # If a file name is provided, append the message to the file
+    if file:
+        with open(file, 'a') as f:
+            f.write(final_message + '\n')
 
 def get_2nd_next_friday():
     # Get today's date
@@ -86,4 +114,5 @@ def get_2nd_next_friday():
     second_next_friday = next_friday + dt.timedelta(weeks=1)
 
     return second_next_friday
+
 

@@ -1,9 +1,10 @@
 import datetime as dt
-import logging
 import time
 import robin_stocks.robinhood as rh
+import pandas as pd
+import math
 from jh_utilities import *
-logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = get_logger(__name__)
 
 
 class Option():
@@ -16,7 +17,7 @@ class Option():
         self.cost = 0
         self._bid_price = 0
         self._ask_price = 0
-        self._markprice = 0
+        self._mark_price = 0
         self._delta = None
         self._theta = None
         self.id = None # To be updated by the below method
@@ -30,11 +31,12 @@ class Option():
         return options_rh
 
     def update(self):
+        logger.debug("updating option...")
         try:
             options_rh = self.get_option_rh()
             
         except EmptyListError as e:
-            logging.error(f"No option found: {e}")
+            logger.error(f"No option found: {e}")
             return
         else:
             option_rh = options_rh[0]
@@ -87,32 +89,82 @@ class Option():
     def get_id(self):
         return self.id
 
-    def get_ask_price(self):
-        self.update()
+    def get_ask_price(self, update=False):
+        if update:
+            self.update()
         return self._ask_price
 
-    def get_bid_price(self):
-        self.update()
+    def get_bid_price(self, update=False):
+        if update:
+            self.update()
         return self._bid_price
     
-    def get_limit_price(self, price_ratio=0.5):
-        self.update()
+    def get_limit_price(self, price_ratio=0.5, update=False):
+        if update:
+            self.update()
         return round(self._bid_price + price_ratio * (self._ask_price - self._bid_price), 2)
 
-    def get_mark_price(self):
-        self.update()
+    def get_mark_price(self, update=False):
+        if update:
+            self.update()
         return self._mark_price
 
-    def get_delta(self):
-        self.update()
+    def get_delta(self, update=False):
+        if update:
+            self.update()
         return self._delta
 
-    def get_theta(self):
-        self.update()
+    def get_theta(self, update=False):
+        if update:
+            self.update()
         return self._theta
 
-    def find_option_to_roll(self, dte_delta, price_ratio):
+    def find_option_to_roll_by_delta(self, dte_delta, risk_level, delta):
         """ Given the underlying option, find an option to roll to with given constraints.
+            Returns the option with at least dte_delta more days till expiration and with the given delta and risk level.
+
+        Args:
+            dte_delta (int): exp of new minus exp of old
+            risk_level (str): low, medium, or high.
+            delta (float): delta of the new option
+        """
+        new_exp_dt = self.get_exp_dt() + dt.timedelta(days=dte_delta)
+        new_exp = new_exp_dt.strftime('%Y-%m-%d') 
+        
+        delta_min = 0.05
+        delta_max = delta if delta > delta_min + 0.05 else delta_min+0.05
+        logger.info(f'Looking for calls to roll with delta between {delta_min} and {delta_max}, expiring on {new_exp}')
+
+        # Loop until potentialOptions is non-empty
+        potentialOptions = []
+        while not potentialOptions:
+            try:
+                [potentialOptions, potentialOptions_df] = find_options_by_delta(self.symbol, new_exp, self.type, delta_min, delta_max)
+            except EmptyListError as e: # If no options found, increment days and reformat new expiration date
+                logger.info(f"No option found matching the given delta range and dte: {e}")
+                logger.info('Push out exp by 1 day.')
+                dte_delta += 1
+                new_exp_dt = self.get_exp_dt() + dt.timedelta(days=dte_delta)
+                new_exp = new_exp_dt.strftime('%Y-%m-%d')
+        
+        # Print potential options
+        logger.info('Found these options candidates to roll to:')
+        print(potentialOptions_df)
+
+        # Select option based on risk level
+        if risk_level == 'low':
+            selectedOption = potentialOptions[0]
+        elif risk_level == 'medium':
+            mid_index = len(potentialOptions) // 2
+            selectedOption = potentialOptions[mid_index]
+        elif risk_level == 'high':
+            selectedOption = potentialOptions[-1]
+            
+        return selectedOption
+
+
+    def find_option_to_rollup_with_credit(self, dte_delta, risk_level):
+        """ Given the underlying option, find an option to roll UP to with given constraints.
             Returns the option with at least dte_delta more days till expiration and with
             price nearest to price_ratio times old price. 
 
@@ -120,43 +172,75 @@ class Option():
             dte_delta (int): exp of new minus exp of old
             price_ratio (float): market price of new divided by market price of old
         """
-        new_exp_dt = self.get_exp_dt() + dt.timedelta(days=dte_delta)
-        new_exp = new_exp_dt.strftime('%Y-%m-%d') 
-        new_price = self.get_mark_price() * price_ratio
-        
-        while True:
-            options_rh = rh.options.find_options_by_expiration(self.symbol, new_exp, self.type)
-            if len(options_rh) != 0:
-                break
-            dte_delta += 1
+        options_rh = []
+        while not options_rh:  # Continue until options_rh is non-empty
             new_exp_dt = self.get_exp_dt() + dt.timedelta(days=dte_delta)
-            new_exp = new_exp_dt.strftime('%Y-%m-%d') 
+            new_exp = new_exp_dt.strftime('%Y-%m-%d')
+            options_rh = rh.options.find_options_by_expiration(self.symbol, new_exp, self.type)
+            dte_delta += 1
+            
+        # find options whose strike is greater than existing strike and price is greater than exisitng price.
+        matchingOptions = []
+        for option_rh in options_rh:
+            mark_price = float(option_rh.get('mark_price', 0))
+            strike = float(option_rh.get('strike_price', 0))
+            if mark_price > self.get_mark_price() and strike >= self.strike:
+                option = Option(self.symbol, option_rh['expiration_date'], float(option_rh['strike_price']), option_rh['type'])
+                matchingOptions.append(option)    
+        matchingOptions = sorted(matchingOptions, key=lambda x: x.strike, reverse=True)
         
+        matchingOptions_df = create_dataframe_from_option_list(matchingOptions)
 
-        # Find the option with the closest market price to the new_price 
-        new_option_rh = min(options_rh, key=lambda x: abs(float(x['mark_price']) - new_price))
-        return Option(self.symbol, new_exp, float(new_option_rh['strike_price']), self.type)
+        
+        logger.info('Found these options candidates to roll to:')
+        print(matchingOptions_df)
+        
+        # Select option based on risk level
+        if risk_level == 'low':
+            selectedOption = matchingOptions[0]
+        elif risk_level == 'medium':
+            mid_index = len(matchingOptions) // 2
+            selectedOption = matchingOptions[mid_index]
+        elif risk_level == 'high':
+            selectedOption = matchingOptions[-1]
+
+        logger.info(f'Selected option [{matchingOptions.index(selectedOption)}] to roll to.')
+    
+        return selectedOption
 
     def roll_option_ioc(self, new_option, position_type, quantity=1, mode='normal'):
+        """Place an order to roll the underlying option to a new option .
+        The order will be canceled if not filled in 2 minuntes.
+        :param new_option: The option to roll to
+        :type new_option: Option 
+        :param position_type: long or short.
+        :type position_type: str
+        :param quantity: the number of options to roll.
+        :type quantity: int
+        :param mode: Normal mode or test mode
+        :type mode: Optional[str]
+        
+        :returns: order_rh if order successful filled. Otherwise, returns None.
+        """ 
         # Check if this option (self) is in position
         optionPositions = OptionPosition()
         old_option = optionPositions.find_and_update_option(self)
         if old_option == None:
-            print_with_time('Option to roll is not in position.')
+            logger.info('Option to roll is not in position.')
             return None
 
         # Check if the underlying stock is the same
         if old_option.symbol != new_option.symbol:
-            print("The two options are not of the same underlying.")
+            logger.info("The two options are not of the same underlying.")
             return None
 
         # Check if the option type is the same
         if old_option.type != new_option.type:
-            print("The two options are not of the same type. Need to be the same type for rolling.")
+            logger.info("The two options are not of the same type. Need to be the same type for rolling.")
             return None
 
-        old_limit_price = old_option.get_limit_price()
-        new_limit_price = new_option.get_limit_price()
+        old_limit_price = old_option.get_limit_price(update=True)
+        new_limit_price = new_option.get_limit_price(update=True)
 
         if position_type == "long":
             price = new_limit_price - old_limit_price
@@ -168,7 +252,7 @@ class Option():
             action2 = "sell"
         else:
             print("Invalid position type. Position type should be either long or short")
-            return
+            return None
 
         debitOrCredit = "debit" if price > 0 else "credit"
 
@@ -176,41 +260,56 @@ class Option():
                 "strike": old_option.strike,
                 "optionType": old_option.type,
                 "effect":"close",
-                "action": action1}
+                "action": action1,
+                "ratio_quantity": 1}
 
         leg2 = {"expirationDate": new_option.exp,
                 "strike": new_option.strike,
                 "optionType": new_option.type,
                 "effect":"open",
-                "action": action2}
+                "action": action2,
+                "ratio_quantity": 1}
 
 
         spread = [leg1,leg2]
-        order_rh = rh.orders.order_option_spread(debitOrCredit, abs(price), new_option.symbol, quantity, spread)
-        print(order_rh)
-        if len(order_rh) != 35:
-             print_with_time('Failed to place order.')
-             return order_rh
-        
+        order_rh = rh.orders.order_option_spread(debitOrCredit, round(abs(price),2), new_option.symbol, quantity, spread, jsonify=False)
+        if order_rh.status_code >= 300 or order_rh.status_code < 200:
+            logger.info('Failed to place order.')
+            logger.info(f'Reason: {order_rh.json()['detail']}')
+            return None
+        else:
+            logger.info(f'Succesfully placed order with status code {order_rh.status_code}. Waiting for order to be filled...')
+            
         # Cancel order after waiting for 2 min 
         time.sleep(120) if mode != 'test' else time.sleep(0)
         pendingOrders = rh.orders.get_all_open_option_orders()
         for pendingOrder in pendingOrders:
-            if order_rh['id'] == pendingOrder['id']:
+            if order_rh.json()['id'] == pendingOrder['id']:
                 rh.orders.cancel_option_order(pendingOrder['id'])
-                print_with_time("Order cancelled since it is not filled after 2 min.")
+                logger.info("Order cancelled since it is not filled after 2 min.")
                 order_rh = None
         return order_rh
 
 
 class OptionPosition():
     def __init__(self):
+        # option positions in a list of Option object
         self.optionPositions = []
+        
+        # option positions in Dataframe format
+        self.positions_df = pd.DataFrame(columns=[])
+        
+        self.all_orders_rh = []
+        
+        # Update to latest
         self.update()
         
     def update(self):
         self.optionPositions = []
         optionPositions_rh = rh.options.get_open_option_positions()
+        self.all_orders_rh = rh.orders.get_all_option_orders()
+        
+        optionTable = []
         for position in optionPositions_rh:
             option_rh = rh.options.get_option_instrument_data_by_id(position['option_id'])
             option = Option(option_rh['chain_symbol'], option_rh['expiration_date'], float(option_rh['strike_price']), option_rh['type'])
@@ -221,35 +320,39 @@ class OptionPosition():
                 option.quantity = quantity
             option.cost = self.calculate_option_cost(option)
             self.optionPositions.append(option)
+            
+            current_price = option.get_mark_price() * option.get_position_type()
+            total_return = current_price * 100 * quantity - option.cost
+
+            row = {'symbol': option.symbol,
+                   'type': option.type,
+                   'side': option.get_position_type_str(),
+                   'exp': option.exp,
+                   'strike': option.strike,
+                   'delta': option.get_delta(),
+                   'theta': option.get_theta(),
+                   'quantity': quantity,
+                   'current price': round(current_price, 2),
+                   'total value': round(current_price * 100 * quantity, 2),
+                   'total cost': round(option.cost, 2),
+                   'total return': round(total_return, 2)
+                   }
+            
+            optionTable.append(row)
+        
+        self.positions_df = pd.DataFrame(optionTable)
+        self.positions_df.sort_values(by='total value', inplace=True, ascending=False)   
+        columns_to_sum = ['total value', 'total cost', 'total return']
+        self.positions_df.loc['sum', columns_to_sum] = self.positions_df[columns_to_sum].sum()
 
     def get_all_positions(self):
         return self.optionPositions
     
     def print_all_positions(self):
         # Print header
-        print('---- Current Option Positions ----')
-
-        # Iterate over each option position
-        for position in self.optionPositions:
-            # Retrieve current market price
-            current_price = position.get_mark_price() * position.get_position_type()
-            # Calculate total return
-            cost = position.cost 
-            total_return = current_price * 100 - cost
-
-            # Print option position details
-            print('symbol:', position.symbol,
-                  ' type:', position.get_position_type_str(), position.type,
-                  ' exp:', position.exp,
-                  ' strike price:', position.strike,
-                  ' quantity:', position.quantity,
-                  ' current price:', round(current_price, 2),
-                  ' current value:', round(current_price * 100, 2),
-                  ' delta:', position.get_delta(),
-                  ' theta:', position.get_theta(),
-                  ' average cost:', round(cost, 2),
-                  ' total return:', round(total_return, 2))
-
+        print_with_time('---- Current Option Positions ----')
+        print(self.positions_df)
+        
     def calculate_option_cost(self, option, verbose=False):  
         symbol = option.symbol
         exp = option.exp
@@ -258,61 +361,31 @@ class OptionPosition():
         side = 'sell' if option.get_position_type() == -1 else 'buy'
         cost = 0
 
-        all_orders_rh = rh.orders.get_all_option_orders()
-        filtered_orders_rh = [item for item in all_orders_rh if item['chain_symbol'] == symbol and item['state']== 'filled']
-        tail = False
-        for index, order in enumerate(filtered_orders_rh):
-            if order['form_source'] == 'strategy_roll':
-                legs = order['legs']
-                for i, leg in enumerate(legs):
-                    conditions = [
-                        leg['position_effect'] == 'open', 
-                        leg['expiration_date'] == exp,
-                        float(leg['strike_price']) == strike,
-                        leg['option_type'] == type,
-                        leg['side']== side
-                    ]
-                    if all(conditions):
-                        premium = float(order['average_net_premium_paid'])
-                        cost = cost + premium
-                        exp = legs[1-i]['expiration_date']
-                        strike = float(legs[1-i]['strike_price'])
-                        if verbose:
-                            print('---option rolling info---')
-                            print('Row # {0}'.format(index))
-                            print('Rolled on:', order['updated_at'])
-                            print('Rolled from:')
-                            print('Expiration date:', exp)
-                            print('Strike price: {0}'.format(strike))
-                            print('Premium paid: {0}'.format(premium))
-                            print('Running cost: {0}'.format(cost))
-                        break
-            else:
-                legs = order['legs']
-                for leg in legs: 
-                    conditions = [
-                        leg['position_effect'] == 'open', 
-                        leg['expiration_date'] == exp,
-                        float(leg['strike_price']) == strike,
-                        leg['option_type'] == type,
-                        leg['side']== side
-                    ]
-                    if all(conditions):
-                        premium = float(order['average_net_premium_paid'])
-                        cost = cost + premium
-                        if verbose:
-                            print('---Original Option Info---')
-                            print('Row # {0}'.format(index))
-                            print('Opened on:', order['updated_at'])
-                            print('Expiration date:', exp)
-                            print('Strike price: {0}'.format(strike))
-                            print('Premium paid: {0}'.format(premium))
-                            print('Running cost: {0}'.format(cost))
-                        tail = True
-                        break
-                if tail:
+        [df_all, df_sc, df_lc] = self.tabulate_option_positions_by_symbol(symbol)
+        
+        if side == 'sell':
+            df = df_sc
+        else:
+            df = df_lc
+        
+        # Reset the index of dataframe
+        df.reset_index(drop=True, inplace=True)
+        
+        for index, row in df.iterrows():
+            if row['effect'] == 'open' and exp == row['exp'] and strike == row['strike'] and type == row['type']:
+                if row['strategy'].startswith('open'):
+                    cost += -1 * row['premium']
                     break
-            
+                elif row['strategy'].startswith('roll'):
+                    if row['strategy'].endswith('#0'):
+                        cost += -1 * row['premium']
+                        exp = df.iloc[index+1]['exp']
+                        strike = df.iloc[index+1]['strike']
+                    else:
+                        cost += -1 * df.iloc[index-1]['premium']
+                        exp = df.iloc[index-1]['exp']
+                        strike = df.iloc[index-1]['strike']
+                   
         return cost                
 
 
@@ -333,27 +406,18 @@ class OptionPosition():
         return None
 
     # Check if there are short call option of the given symbol in current postions
-    def is_short_call_in_position(self, symbol):
+    def count_short_call_by_symbol(self, symbol):
+        count = 0
         for position in self.optionPositions:
             type = position.type
             positionType = position.get_position_type_str()
             if  position.symbol == symbol and type == 'call' and positionType == 'short':
-                return True
+                count += abs(position.quantity)
         
-        return False
-
-    # Check if there are long call option of the given symbol in current postions
-    def is_long_call_in_position(self, symbol):
-        for position in self.optionPositions:
-            type = position.type
-            positionType = position.get_position_type_str()
-            if  position.symbol == symbol and type == 'call' and positionType == 'long':
-                return True
-        
-        return False
+        return count
    
     # Count how many long call positions of given symbol 
-    def long_call_quantity(self, symbol):
+    def count_long_call_by_symbol(self, symbol):
         count = 0
         for position in self.optionPositions:
             type = position.type
@@ -363,6 +427,110 @@ class OptionPosition():
         
         return count
 
+
+    def tabulate_option_positions_by_symbol(self, symbol):
+        """Process past option positions by symbol
+
+            Args:
+                symbol (_type_): string
+
+            Returns:
+                _type_: Pandas dataframe
+                        returns 3 dataframes:
+                        1) All options with legs expanded
+                        2) All covered calls
+                        3) All long calls 
+            """
+        filtered_orders_rh = [item for item in self.all_orders_rh if item['chain_symbol'] == symbol and item['state']== 'filled']
+        df = pd.DataFrame(filtered_orders_rh)
+        selected_columns = ['created_at', 'direction', 'legs', 'opening_strategy', 'closing_strategy', 'form_source', 'average_net_premium_paid', 'processed_premium', 'quantity']
+        df_selected = df[selected_columns]
+        expand_columns = ['time', 'strategy', 'effect', 'side', 'type', 'exp', 'strike', 'quantity', 'price', 'premium']
+        df_all = pd.DataFrame(columns=expand_columns)
+        for index, row in df_selected.iterrows():
+            time = row['created_at'] 
+            time_dt = dt.datetime.strptime(time, '%Y-%m-%dT%H:%M:%S.%fZ')
+            time_dt -= dt.timedelta(hours=7)
+            time = time_dt.strftime('%Y-%m-%d %H:%M')
+            quantity = float(row['quantity'])
+            for legIndex, leg in enumerate(row['legs']):
+                option_price = float(leg['executions'][0]['price'])
+                effect = leg['position_effect']
+                side = leg['side']
+                option_type = leg['option_type']
+                exp = leg['expiration_date']
+                strike = float(leg['strike_price'])
+                premium = option_price * quantity * 100
+                premium = -1 * premium if side == 'buy' else premium
+                if effect == 'open':
+                    short_or_long = 'short' if side == 'sell' else 'long'
+                else:
+                    short_or_long = 'short' if side == 'buy' else 'long'  
+                    
+                if row['form_source'] == 'strategy_roll':
+                    strategy = 'roll: ' + short_or_long+ ' ' + option_type + ' leg #' + str(legIndex)
+                else:
+                    strategy = effect + ': ' + short_or_long + ' ' + option_type
+
+                df_all.loc[len(df_all)] = [time, strategy, effect, side, option_type, exp, strike, quantity, option_price, premium]
+                
+        df_all['running_premium'] = df_all.iloc[::-1]['premium'].cumsum()[::-1]
+        
+        # Process net cost for rolls
+        for index, row in df_all.iterrows():
+            if row['strategy'][:4] == 'roll' and row['strategy'][-2:] == '#0':
+                next_row = df_all.iloc[index+1]   
+                df_all.at[index, 'premium'] += next_row['premium']
+                df_all.at[index+1, 'premium'] = 0
+
+        # Filter short calls (covered calls)
+        mask = df_all['strategy'].str.contains('short call')
+        df_sc = df_all.loc[mask].copy()
+        df_sc['running_premium']=df_sc.iloc[::-1]['premium'].cumsum()[::-1]
+        
+        # Filter long calls (leaps)
+        mask = df_all['strategy'].str.contains('long call')
+        df_lc = df_all.loc[mask].copy()
+        df_lc['running_premium']=df_lc.iloc[::-1]['premium'].cumsum()[::-1]
+        
+        return df_all, df_sc, df_lc
+
+    def get_covered_call_limit(self, symbol):
+        """Calculate the maximal amount of covered calls that can be written based on current positions
+
+        Args:
+            symbol (string): stock symbol of the call
+
+        Returns:
+            cc_limit (int): maximal number of covered call that can be written.  
+        """    
+        # Check how many existing short calls for the underlying stock
+        logger.debug('Check how many existing short calls are in positions...')
+        short_call_num = self.count_short_call_by_symbol(symbol)
+        logger.debug(f'Total short calls: {short_call_num} for {symbol}.')
+        
+        # Check if there is long call positions to cover the short call
+        logger.debug('Check how many existing long calls are in positions to cover short call....')
+        long_call_num = self.count_long_call_by_symbol(symbol)
+        logger.debug(f'Total long calls: {long_call_num} for {symbol}.')
+
+        #TODO: Make the below code a method in optionPosition
+        # Check if there is enough underlying stocks to cover the short call
+        logger.debug('Check how many stocks in units of 100 to cover the short call...')
+        stock_positions = rh.account.get_open_stock_positions()
+        stock_lots = 0
+        for position in stock_positions:
+            stock_info = rh.stocks.get_stock_quote_by_id(position['instrument_id'])
+            position_symbol = stock_info['symbol']
+            if symbol == position_symbol:
+                position_shares = float(position['quantity'])
+                stock_lots = math.floor(position_shares/100)
+                break
+        logger.debug(f'Total stocks in units of 100: {stock_lots} for {symbol}.')
+        
+        cc_limit = long_call_num + stock_lots - short_call_num
+        logger.debug(f'Covered call limit is: {cc_limit} for {symbol}.')
+        return cc_limit
 
 
 def find_options_by_delta(symbol, exp, type, delta_min, delta_max):
@@ -399,8 +567,25 @@ def find_options_by_delta(symbol, exp, type, delta_min, delta_max):
             matchingOptions.append(option)
     
     matchingOptions_sorted = sorted(matchingOptions, key=lambda x: x.get_delta())
-    
-    return matchingOptions_sorted
+        
+    matchingOptions_df = create_dataframe_from_option_list(matchingOptions_sorted)
+    return matchingOptions_sorted, matchingOptions_df
+
+def create_dataframe_from_option_list(option_list):
+    optionTable = []
+    for option in option_list:
+        row = { 'symbol': option.symbol,
+                'type': option.type,
+                'exp': option.exp,
+                'strike': option.strike,
+                'delta': option.get_delta(),
+                'theta': option.get_theta(),
+                'current price': round(option.get_mark_price(), 2)
+                }
+        optionTable.append(row)
+        
+    return pd.DataFrame(optionTable)
+
 
 def is_option_in_open_orders(option):
     existingOrders_rh = rh.orders.get_all_open_option_orders()
@@ -411,11 +596,7 @@ def is_option_in_open_orders(option):
             if option.get_id() == existingOption_rh['id']:
                 return True 
     return False
-#options = find_options_by_delta('AAPL', '2024-05-24', 'call', 0.2, 0.8)
-#
-#options_sorted = sorted(options, key=lambda x: x.get_delta())
-#for option in options_sorted:
-#    option.print()
+
 
 def close_short_option_ioc(option_to_close, price, quantity=1, mode='normal'):
     symbol = option_to_close.symbol
@@ -440,7 +621,7 @@ def close_short_option_ioc(option_to_close, price, quantity=1, mode='normal'):
 
 def is_call_covered(short_call, short_call_quantity):
     # Check if there is short call position already
-    print('--See if there are short call positions already...')
+    logger.info('--See if there are short call positions already...')
     optionPositions = OptionPosition()
     if optionPositions.is_short_call_in_position(short_call.symbol):
         return False
