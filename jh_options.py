@@ -476,7 +476,30 @@ class OptionPosition():
                 
         df_all['running_premium'] = df_all.iloc[::-1]['premium'].cumsum()[::-1]
         
-        # Process net cost for rolls
+        
+        # Pair orders occured at the same time a roll pair if certain conditions are met
+        for index, row in df_all.iterrows():
+            next_index = index + 1
+            # Check if next index is within bounds and conditions match
+            
+            if next_index in df_all.index:
+                if df_all.at[index, 'time'] == df_all.at[next_index, 'time']:
+                    current_effect, next_effect = df_all.at[index, 'effect'], df_all.at[next_index, 'effect']
+                    current_side = row['side']
+
+                    # Handle "open-close" sequence
+                    if current_effect == 'open' and next_effect == 'close':
+                        leg_type = 'short' if current_side == 'sell' else 'long'
+                        df_all.at[index, 'strategy'] = f'roll: {leg_type} {row["type"]} leg #0'
+                        df_all.at[next_index, 'strategy'] = f'roll: {leg_type} {row["type"]} leg #1'
+
+                    # Handle "close-open" sequence
+                    elif current_effect == 'close' and next_effect == 'open':
+                        leg_type = 'short' if current_side == 'buy' else 'long'
+                        df_all.at[index, 'strategy'] = f'roll: {leg_type} {row["type"]} leg #0'
+                        df_all.at[next_index, 'strategy'] = f'roll: {leg_type} {row["type"]} leg #1'
+        
+        # Calculate the net premium of roll pairs. 
         for index, row in df_all.iterrows():
             if row['strategy'][:4] == 'roll' and row['strategy'][-2:] == '#0':
                 next_row = df_all.iloc[index+1]   
