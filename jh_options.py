@@ -128,6 +128,7 @@ class Option():
             risk_level (str): low, medium, or high.
             delta (float): delta of the new option
         """
+        logger.info(f'Looking for options to roll out by {dte_delta} days and delta < {delta} with risk level = {risk_level}...')
         new_exp_dt = self.get_exp_dt() + dt.timedelta(days=dte_delta)
         new_exp = new_exp_dt.strftime('%Y-%m-%d') 
         
@@ -136,29 +137,39 @@ class Option():
         logger.info(f'Looking for calls to roll with delta between {delta_min} and {delta_max}, expiring on {new_exp}')
 
         # Loop until potentialOptions is non-empty
-        potentialOptions = []
-        while not potentialOptions:
+        matchingOptions = []
+        while not matchingOptions:
             try:
-                [potentialOptions, potentialOptions_df] = find_options_by_delta(self.symbol, new_exp, self.type, delta_min, delta_max)
+                matchingOptions = find_options_by_delta(self.symbol, new_exp, self.type, delta_min, delta_max)
             except EmptyListError as e: # If no options found, increment days and reformat new expiration date
-                logger.info(f"No option found matching the given delta range and dte: {e}")
+                logger.info(f"No option found matching the given delta range or dte: {e}")
                 logger.info('Push out exp by 1 day.')
                 dte_delta += 1
                 new_exp_dt = self.get_exp_dt() + dt.timedelta(days=dte_delta)
                 new_exp = new_exp_dt.strftime('%Y-%m-%d')
         
+        if len(matchingOptions) == 0:
+            logger.info('No mathcing option found for rolling.')
+            return None        
+        
         # Print potential options
+        matchingOptions_df = create_dataframe_from_option_list(matchingOptions)
+        
+        # Add a column to show potential credit earned if rolled.
+        for index, row in matchingOptions_df.iterrows():
+            matchingOptions_df.at[index, 'credit estimate'] = 100*(row['current price'] - self.get_mark_price())
+            
         logger.info('Found these options candidates to roll to:')
-        print(potentialOptions_df)
+        print(matchingOptions_df)
 
         # Select option based on risk level
         if risk_level == 'low':
-            selectedOption = potentialOptions[0]
+            selectedOption = matchingOptions[0]
         elif risk_level == 'medium':
-            mid_index = len(potentialOptions) // 2
-            selectedOption = potentialOptions[mid_index]
+            mid_index = len(matchingOptions) // 2
+            selectedOption = matchingOptions[mid_index]
         elif risk_level == 'high':
-            selectedOption = potentialOptions[-1]
+            selectedOption = matchingOptions[-1]
             
         return selectedOption
 
@@ -172,6 +183,7 @@ class Option():
             dte_delta (int): exp of new minus exp of old
             price_ratio (float): market price of new divided by market price of old
         """
+        logger.info(f'Looking for options to roll out by {dte_delta} days and roll up with credit...')
         options_rh = []
         while not options_rh:  # Continue until options_rh is non-empty
             new_exp_dt = self.get_exp_dt() + dt.timedelta(days=dte_delta)
@@ -187,10 +199,19 @@ class Option():
             if mark_price > self.get_mark_price() and strike >= self.strike:
                 option = Option(self.symbol, option_rh['expiration_date'], float(option_rh['strike_price']), option_rh['type'])
                 matchingOptions.append(option)    
+        
+        if len(matchingOptions) == 0:
+            logger.info('No mathcing option found for rolling.')
+            return None
+        
         matchingOptions = sorted(matchingOptions, key=lambda x: x.strike, reverse=True)
         
         matchingOptions_df = create_dataframe_from_option_list(matchingOptions)
-
+        
+        # Add a column to show potential credit earned if rolled.
+        for index, row in matchingOptions_df.iterrows():
+            matchingOptions_df.at[index, 'credit estimate'] = 100*(row['current price'] - self.get_mark_price())
+    
         
         logger.info('Found these options candidates to roll to:')
         print(matchingOptions_df)
@@ -565,7 +586,7 @@ def find_options_by_delta(symbol, exp, type, delta_min, delta_max):
     :param type: 'call' or 'put'.
     :param delta_min: Minimum delta value.
     :param delta_max: Maximum delta value.
-    :return: A list of options in Option object that match the criteria.
+    :return: A list of options in Option object that match the criteria. Otherwise, returns None.
     """
     
     # Get all options for the specified symbol and expiration date
@@ -589,10 +610,11 @@ def find_options_by_delta(symbol, exp, type, delta_min, delta_max):
             option = Option(symbol, option_rh['expiration_date'], float(option_rh['strike_price']), option_rh['type'])
             matchingOptions.append(option)
     
+    if len(matchingOptions) == 0: return None
+    
     matchingOptions_sorted = sorted(matchingOptions, key=lambda x: x.get_delta())
         
-    matchingOptions_df = create_dataframe_from_option_list(matchingOptions_sorted)
-    return matchingOptions_sorted, matchingOptions_df
+    return matchingOptions_sorted
 
 def create_dataframe_from_option_list(option_list):
     optionTable = []

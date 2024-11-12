@@ -225,23 +225,23 @@ class OptionTrader():
         logger.info(f'Return percentage now is {return_pcnt}%')
 
         # Managing logic
-        if strike < stockPrice:
+        if strike < stockPrice or self.mode == 'test':
             logger.info(f'This call is currently in the money!')
             if dte <= 1 and strike < 0.95*stockPrice or self.mode == 'test':
                 logger.info(f'[Action] Rolling this call to prevent assignment since call deep ITM and dte = {dte}.')
                 option_to_roll = option.find_option_to_rollup_with_credit(dte_delta=7, risk_level=self.risk_level)
-                status = option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
+                status = None if option_to_roll == None else option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
             elif dte == 0 and strike >= 0.95*stockPrice:
                 logger.info(f'[Action] Rolling this call to prevent assignment since call ITM and it expires today.')
                 option_to_roll = option.find_option_to_rollup_with_credit(dte_delta=7, risk_level=self.risk_level)
-                status = option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
+                status = None if option_to_roll == None else option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
             else:
                 logger.info(f'[Action] Too early for action. Do nothing.\n')
         else:
             if return_rate > 0.95:
                 logger.info(f'[Action] Rolling this call to start a new cc cycle since call gained >95% return. ')
                 option_to_roll = option.find_option_to_roll_by_delta(dte_delta=7, risk_level=self.risk_level, delta=self.delta)
-                status = option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
+                status = None if option_to_roll == None else option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
             else:
                 logger.info(f'[Action] Too early for action. Do nothing.\n')
         return status
