@@ -43,7 +43,7 @@ class Option():
 
         self._ask_price = round(float(option_rh['ask_price']), 2)
         self._bid_price = round(float(option_rh['bid_price']), 2)
-        self._mark_price = round(float(option_rh['mark_price']), 2)
+        self._mark_price = round(float(option_rh['adjusted_mark_price']), 2)
         self._delta = round(float(option_rh['delta']), 4)
         self._theta = round(float(option_rh['theta']), 4)
         self.id = option_rh['id']
@@ -194,7 +194,7 @@ class Option():
         # find options whose strike is greater than existing strike and price is greater than exisitng price.
         matchingOptions = []
         for option_rh in options_rh:
-            mark_price = float(option_rh.get('mark_price', 0))
+            mark_price = float(option_rh.get('adjusted_mark_price', 0))
             strike = float(option_rh.get('strike_price', 0))
             if mark_price > self.get_mark_price() and strike >= self.strike:
                 option = Option(self.symbol, option_rh['expiration_date'], float(option_rh['strike_price']), option_rh['type'])
@@ -213,7 +213,7 @@ class Option():
             matchingOptions_df.at[index, 'credit estimate'] = 100*(row['current price'] - self.get_mark_price())
     
         
-        logger.info('Found these options candidates to roll to:')
+        logger.info('Found these option candidates to roll to:')
         print(matchingOptions_df)
         
         # Select option based on risk level

@@ -59,7 +59,6 @@ class OptionTrader():
             logger.info('**** Entering short call placing logic ****')
             logger.info(f'In total {self.MAX_ATTEMPT} attempts to place orders.')
             while attempt < self.MAX_ATTEMPT:
-                logger.info(f'Attempt # {attempt+1}')
                 # Attempt to place short calls for all the symbols
                 for symbol in self.symbol_list:
                     shortCallOrder_rh = self.open_short_call(symbol, dte, 0.5+0.05*attempt)
@@ -79,10 +78,12 @@ class OptionTrader():
                 if len(pendingOrders_rh) == 0: break
                 
                 # Cancel unfilled orders
+                logger.info(f'Cancelling orders not filled in 5 min. Starting attempt #{attempt+2}')
                 for shortCallOrder_rh in shortCallOrder_rh_list:
                     for pendingOrder_rh in pendingOrders_rh:
                         if shortCallOrder_rh['id'] == pendingOrder_rh['id']:
                             rh.orders.cancel_option_order(pendingOrder_rh['id'])
+            
                 attempt += 1
 
     def manage_short_calls_logic(self):
@@ -198,15 +199,15 @@ class OptionTrader():
 
     def manage_short_call(self, option):
         status = None
-        logger.info(f'Managing short call with symbol: {option.symbol}, exp: {option.exp}, strike: {option.strike}')
+        logger.info(f'\n** Managing short call with symbol: {option.symbol}, exp: {option.exp}, strike: {option.strike} **')
 
         # Check if the short call exists in open positions
         option = self.positions.find_and_update_option(option)
         if option == None:
             logger.critical('The short option to close is not open in your account. Option not closed.')
-            exit()
+            return None
             
-        # Check if the short cal is in open orders
+        # Check if the short call is in open orders
         if is_option_in_open_orders(option):
             logger.info('The order for this short call is queuing in current open orders. Wait till it is filled.')
             return None
