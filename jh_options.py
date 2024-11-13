@@ -4,8 +4,8 @@ import robin_stocks.robinhood as rh
 import pandas as pd
 import math
 from jh_utilities import *
-logger = get_logger(__name__)
-
+#logger = get_logger(__name__)
+logger = get_logger(__name__, log_to_file=True, file_name="my_log_file.log")
 
 class Option():
     def __init__(self, symbol, exp, strike, type):

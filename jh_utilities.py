@@ -3,23 +3,28 @@ import datetime as dt
 import config
 import logging
 
-
-# Configure logging settings
+# Configure logging settings for console output
 logging.basicConfig(
     format='[%(asctime)s] {%(filename)s:%(lineno)d} %(levelname)s - %(message)s',
     level=logging.INFO
 )
 
 # Define a function to get a logger
-def get_logger(name: str) -> logging.Logger:
-    """Get a logger with the specified name."""
+def get_logger(name: str, log_to_file: bool = False, file_name: str = "app.log") -> logging.Logger:
+    """Get a logger with the specified name. Optionally log to a file."""
     logger = logging.getLogger(name)
+    
     # Ensuring that logger only has handlers set once to prevent duplicate logs
     if not logger.handlers:
-        # Optional: Add other handlers if needed, e.g., a file handler
-        # file_handler = logging.FileHandler("app.log")
-        # logger.addHandler(file_handler)
-        pass
+        # Add a file handler if log_to_file is True
+        if log_to_file:
+            file_handler = logging.FileHandler(file_name)
+            file_handler.setLevel(logging.INFO)
+            file_handler.setFormatter(logging.Formatter(
+                '[%(asctime)s] {%(filename)s:%(lineno)d} %(levelname)s - %(message)s'
+            ))
+            logger.addHandler(file_handler)
+    
     return logger
 
 

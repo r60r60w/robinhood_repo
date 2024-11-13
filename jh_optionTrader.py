@@ -1,10 +1,10 @@
-import datetime as dt
+import datetime as dt       
 import time
 import robin_stocks.robinhood as rh
 from jh_utilities import *
 from jh_options import *
-logger = get_logger(__name__)
-
+#logger = get_logger(__name__)
+logger = get_logger(__name__, log_to_file=True, file_name="my_log_file.log")
 
 
 class OptionTrader():
@@ -37,11 +37,13 @@ class OptionTrader():
         while True:
             self.place_short_calls_logic()      
             self.manage_short_calls_logic()
+            logger.info('Wait for 5 min before starting new iteration.')
             time.sleep(300) if self.mode != 'test' else time.sleep(0)
             
     def place_short_calls_logic(self):
         """Place short calls as allowed by current position.
         """  
+        logger.info('**** Entering short call placing logic ****')
         shortCallOrder_rh_list = []
         todayDate_dt = dt.datetime.today().date()
         exp_dt = get_2nd_next_friday()
@@ -56,7 +58,6 @@ class OptionTrader():
             # If order not filled in x minutes, cancel the orders and place again for MAX_ATTEMPT times.
             # Each attempt slightly increase the bit price.
             attempt = 0
-            logger.info('**** Entering short call placing logic ****')
             logger.info(f'In total {self.MAX_ATTEMPT} attempts to place orders.')
             while attempt < self.MAX_ATTEMPT:
                 # Attempt to place short calls for all the symbols
@@ -85,6 +86,8 @@ class OptionTrader():
                             rh.orders.cancel_option_order(pendingOrder_rh['id'])
             
                 attempt += 1
+        else:
+            logger.info('Market is closed now.')
 
     def manage_short_calls_logic(self):
         """Manage all existing short calls by considering moneyness, return rate, etc.
@@ -107,6 +110,8 @@ class OptionTrader():
         if is_market_open_now() or self.mode == 'test':
             for option in shortCalls:
                 self.manage_short_call(option) 
+        else:
+            logger.info('Market is closed now.')
         
 
     def open_short_call(self, symbol, dte, price_ratio=0.5):
@@ -200,7 +205,7 @@ class OptionTrader():
 
     def manage_short_call(self, option):
         status = None
-        logger.info(f'** Managing short call with symbol: {option.symbol}, exp: {option.exp}, strike: {option.strike} **')
+        logger.info(f'** Managing short call of symbol: {option.symbol}, exp: {option.exp}, strike: {option.strike} **')
 
         # Check if the short call exists in open positions
         option = self.positions.find_and_update_option(option)
@@ -231,7 +236,7 @@ class OptionTrader():
             logger.info(f'[{option.symbol}] This call is currently in the money!')
             if dte <= 1 and strike < 0.95*stockPrice or self.mode == 'test':
                 logger.info(f'[Action] Rolling this call to prevent assignment since call deep ITM and dte = {dte}.')
-                option_to_roll = option.find_option_to_rollup_with_credit(dte_delta=5, risk_level=self.risk_level)
+                option_to_roll = option.find_option_to_rollup_with_credit(dte_delta=7, risk_level=self.risk_level)
                 status = None if option_to_roll == None else option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
             elif dte == 0 and strike >= 0.95*stockPrice:
                 logger.info(f'[Action] Rolling this call to prevent assignment since call ITM and it expires today.')
