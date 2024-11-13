@@ -92,15 +92,16 @@ class OptionTrader():
         # Manage opened covered call positions
         # Gather all covered calls in positions
         # Run loop until no covered calls left in position.
-        logger.info('**** Entering short call placing logic ****')
+        logger.info('**** Entering short call managing logic ****')
         logger.info('Gathering all covered calls in current positions...')
         shortCalls = []
         self.positions.update() 
-        for position in self.positions.optionPositions:
+        for position in self.positions.list:
             if position.type == 'call' and position.get_position_type_str() == 'short' and position not in shortCalls:
                 shortCalls.append(position)
         
-        shortCalls_df = create_dataframe_from_option_list(shortCalls)
+        shortCalls_df = self.positions.df.loc[self.positions.df['side'] == 'short']
+        shortCalls_df.reset_index(drop=True, inplace=True)
         print(shortCalls_df)
         
         if is_market_open_now() or self.mode == 'test':
@@ -199,17 +200,17 @@ class OptionTrader():
 
     def manage_short_call(self, option):
         status = None
-        logger.info(f'\n** Managing short call with symbol: {option.symbol}, exp: {option.exp}, strike: {option.strike} **')
+        logger.info(f'** Managing short call with symbol: {option.symbol}, exp: {option.exp}, strike: {option.strike} **')
 
         # Check if the short call exists in open positions
         option = self.positions.find_and_update_option(option)
         if option == None:
-            logger.critical('The short option to close is not open in your account. Option not closed.')
+            logger.critical(f'[{option.symbol}] The short option to close is not open in your account. Option not closed.')
             return None
             
         # Check if the short call is in open orders
         if is_option_in_open_orders(option):
-            logger.info('The order for this short call is queuing in current open orders. Wait till it is filled.')
+            logger.info(f'[{option.symbol}] The order for this short call is queuing in current open orders. Wait till it is filled.')
             return None
         
         cost = option.cost
@@ -221,16 +222,16 @@ class OptionTrader():
         dte = (option.get_exp_dt().date() - dt.datetime.now().date()).days
         strike = option.strike
         stockPrice = float(rh.stocks.get_latest_price(option.symbol)[0])
-        logger.info(f'The short call has {dte} days till expiration')
-        logger.info(f'Stock price: {stockPrice} vs strike price: {strike}.')
-        logger.info(f'Return percentage now is {return_pcnt}%')
+        logger.info(f'[{option.symbol}] The short call has {dte} days till expiration')
+        logger.info(f'[{option.symbol}] Stock price: {stockPrice} vs strike price: {strike}.')
+        logger.info(f'[{option.symbol}] Return percentage now is {return_pcnt}%')
 
         # Managing logic
         if strike < stockPrice or self.mode == 'test':
-            logger.info(f'This call is currently in the money!')
+            logger.info(f'[{option.symbol}] This call is currently in the money!')
             if dte <= 1 and strike < 0.95*stockPrice or self.mode == 'test':
                 logger.info(f'[Action] Rolling this call to prevent assignment since call deep ITM and dte = {dte}.')
-                option_to_roll = option.find_option_to_rollup_with_credit(dte_delta=7, risk_level=self.risk_level)
+                option_to_roll = option.find_option_to_rollup_with_credit(dte_delta=5, risk_level=self.risk_level)
                 status = None if option_to_roll == None else option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
             elif dte == 0 and strike >= 0.95*stockPrice:
                 logger.info(f'[Action] Rolling this call to prevent assignment since call ITM and it expires today.')
@@ -238,7 +239,7 @@ class OptionTrader():
                 status = None if option_to_roll == None else option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
             else:
                 logger.info(f'[Action] Too early for action. Do nothing.\n')
-        else:
+        else :
             if return_rate > 0.95:
                 logger.info(f'[Action] Rolling this call to start a new cc cycle since call gained >95% return. ')
                 option_to_roll = option.find_option_to_roll_by_delta(dte_delta=7, risk_level=self.risk_level, delta=self.delta)

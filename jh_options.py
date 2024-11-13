@@ -15,6 +15,7 @@ class Option():
         self.type = type
         self.quantity = 0
         self.cost = 0
+        self.cum_cost = 0 # Cumulative cost considering option rolls.
         self._bid_price = 0
         self._ask_price = 0
         self._mark_price = 0
@@ -128,13 +129,13 @@ class Option():
             risk_level (str): low, medium, or high.
             delta (float): delta of the new option
         """
-        logger.info(f'Looking for options to roll out by {dte_delta} days and delta < {delta} with risk level = {risk_level}...')
+#        logger.info(f'[{self.symbol}] Looking for options to roll out by {dte_delta} days and delta < {delta} with risk level = {risk_level}...')
         new_exp_dt = self.get_exp_dt() + dt.timedelta(days=dte_delta)
         new_exp = new_exp_dt.strftime('%Y-%m-%d') 
         
         delta_min = 0.05
         delta_max = delta if delta > delta_min + 0.05 else delta_min+0.05
-        logger.info(f'Looking for calls to roll with delta between {delta_min} and {delta_max}, expiring on {new_exp}')
+        logger.info(f'[{self.symbol}] Looking for calls to roll with delta between {delta_min} and {delta_max}, expiring on {new_exp}')
 
         # Loop until potentialOptions is non-empty
         matchingOptions = []
@@ -142,14 +143,14 @@ class Option():
             try:
                 matchingOptions = find_options_by_delta(self.symbol, new_exp, self.type, delta_min, delta_max)
             except EmptyListError as e: # If no options found, increment days and reformat new expiration date
-                logger.info(f"No option found matching the given delta range or dte: {e}")
-                logger.info('Push out exp by 1 day.')
+                logger.info(f'[{self.symbol}] No option found on {new_exp}.')
+                logger.info(f'[{self.symbol}] Push out exp by 1 day.')
                 dte_delta += 1
                 new_exp_dt = self.get_exp_dt() + dt.timedelta(days=dte_delta)
                 new_exp = new_exp_dt.strftime('%Y-%m-%d')
         
         if len(matchingOptions) == 0:
-            logger.info('No mathcing option found for rolling.')
+            logger.info(f'[{self.symbol}] No mathcing option found for rolling matching the delta range.')
             return None        
         
         # Print potential options
@@ -159,7 +160,7 @@ class Option():
         for index, row in matchingOptions_df.iterrows():
             matchingOptions_df.at[index, 'credit estimate'] = 100*(row['current price'] - self.get_mark_price())
             
-        logger.info('Found these options candidates to roll to:')
+        logger.info(f'[{self.symbol}] Found these options candidates to roll to:')
         print(matchingOptions_df)
 
         # Select option based on risk level
@@ -170,7 +171,7 @@ class Option():
             selectedOption = matchingOptions[mid_index]
         elif risk_level == 'high':
             selectedOption = matchingOptions[-1]
-            
+        logger.info(f'Selected option [{matchingOptions.index(selectedOption)}] to roll to.')
         return selectedOption
 
 
@@ -185,10 +186,13 @@ class Option():
         """
         logger.info(f'Looking for options to roll out by {dte_delta} days and roll up with credit...')
         options_rh = []
-        while not options_rh:  # Continue until options_rh is non-empty
+        while True:  # Continue until options_rh is non-empty
             new_exp_dt = self.get_exp_dt() + dt.timedelta(days=dte_delta)
             new_exp = new_exp_dt.strftime('%Y-%m-%d')
             options_rh = rh.options.find_options_by_expiration(self.symbol, new_exp, self.type)
+            if options_rh: break
+            logger.info(f'[{self.symbol}] No option found on {new_exp}.')
+            logger.info(f'[{self.symbol}] Push out exp by 1 day.')
             dte_delta += 1
             
         # find options whose strike is greater than existing strike and price is greater than exisitng price.
@@ -291,15 +295,18 @@ class Option():
                 "action": action2,
                 "ratio_quantity": 1}
 
-
+        logger.info(f'[{self.symbol}] Attempt to place an order to roll:')
+        logger.info(f'[{self.symbol}] from exp: {old_option.exp}, strike: {old_option.strike}')
+        logger.info(f'[{self.symbol}] to   exp: {new_option.exp}, strike: {new_option.strike}')
+        logger.info(f'[{self.symbol}] with credit: ${round(-1*price*100,2)}.')
         spread = [leg1,leg2]
         order_rh = rh.orders.order_option_spread(debitOrCredit, round(abs(price),2), new_option.symbol, quantity, spread, jsonify=False)
         if order_rh.status_code >= 300 or order_rh.status_code < 200:
-            logger.info('Failed to place order.')
-            logger.info(f'Reason: {order_rh.json()['detail']}')
+            logger.info(f'[{self.symbol}] Failed to place order.')
+            logger.info(f'[{self.symbol}] Reason: {order_rh.json()['detail']}')
             return None
         else:
-            logger.info(f'Succesfully placed order with status code {order_rh.status_code}. Waiting for order to be filled...')
+            logger.info(f'[{self.symbol}] Succesfully placed order with status code {order_rh.status_code}. Waiting for order to be filled...')
             
         # Cancel order after waiting for 2 min 
         time.sleep(120) if mode != 'test' else time.sleep(0)
@@ -307,7 +314,7 @@ class Option():
         for pendingOrder in pendingOrders:
             if order_rh.json()['id'] == pendingOrder['id']:
                 rh.orders.cancel_option_order(pendingOrder['id'])
-                logger.info("Order cancelled since it is not filled after 2 min.")
+                logger.info(f"[{self.symbol}] Order cancelled since it is not filled after 2 min.")
                 order_rh = None
         return order_rh
 
@@ -315,10 +322,10 @@ class Option():
 class OptionPosition():
     def __init__(self):
         # option positions in a list of Option object
-        self.optionPositions = []
+        self.list = []
         
         # option positions in Dataframe format
-        self.positions_df = pd.DataFrame(columns=[])
+        self.df = pd.DataFrame(columns=[])
         
         self.all_orders_rh = []
         
@@ -326,7 +333,7 @@ class OptionPosition():
         self.update()
         
     def update(self):
-        self.optionPositions = []
+        self.list = []
         optionPositions_rh = rh.options.get_open_option_positions()
         self.all_orders_rh = rh.orders.get_all_option_orders()
         
@@ -339,11 +346,12 @@ class OptionPosition():
                 option.quantity = -1*quantity
             elif position['type'] == 'long':
                 option.quantity = quantity
+            option.cum_cost = self.calculate_option_cumulative_cost(option)
             option.cost = self.calculate_option_cost(option)
-            self.optionPositions.append(option)
+            self.list.append(option)
             
             current_price = option.get_mark_price() * option.get_position_type()
-            total_return = current_price * 100 * quantity - option.cost
+            total_return = current_price * 100 * quantity - option.cum_cost
 
             row = {'symbol': option.symbol,
                    'type': option.type,
@@ -355,26 +363,53 @@ class OptionPosition():
                    'quantity': quantity,
                    'current price': round(current_price, 2),
                    'total value': round(current_price * 100 * quantity, 2),
-                   'total cost': round(option.cost, 2),
+                   'total cost': round(option.cum_cost, 2),
                    'total return': round(total_return, 2)
                    }
             
             optionTable.append(row)
         
-        self.positions_df = pd.DataFrame(optionTable)
-        self.positions_df.sort_values(by='total value', inplace=True, ascending=False)   
+        self.df = pd.DataFrame(optionTable)
+        self.df.sort_values(by='total value', inplace=True, ascending=False)   
         columns_to_sum = ['total value', 'total cost', 'total return']
-        self.positions_df.loc['sum', columns_to_sum] = self.positions_df[columns_to_sum].sum()
+        self.df.loc['sum', columns_to_sum] = self.df[columns_to_sum].sum()
 
     def get_all_positions(self):
-        return self.optionPositions
+        return self.list
     
     def print_all_positions(self):
         # Print header
         print_with_time('---- Current Option Positions ----')
-        print(self.positions_df)
+        print(self.df)
+     
+    def calculate_option_cost(self, option):  
+        symbol = option.symbol
+        exp = option.exp
+        strike = option.strike
+        type = option.type
+        side = 'sell' if option.get_position_type() == -1 else 'buy'
+        cost = 0
+
+        [df_all, df_sc, df_lc] = self.tabulate_option_positions_by_symbol(symbol)
         
-    def calculate_option_cost(self, option, verbose=False):  
+        if side == 'sell':
+            df = df_sc
+        else:
+            df = df_lc
+        
+        # Reset the index of dataframe
+        df.reset_index(drop=True, inplace=True)
+        
+        for index, row in df.iterrows():
+            if row['effect'] == 'open' and exp == row['exp'] and strike == row['strike'] and type == row['type']:
+                cost = abs(row['price']) * 100
+                if side == 'sell': cost = -1 * cost
+                break
+                   
+        return cost                
+     
+        
+    def calculate_option_cumulative_cost(self, option):  
         symbol = option.symbol
         exp = option.exp
         strike = option.strike
@@ -410,6 +445,7 @@ class OptionPosition():
         return cost                
 
 
+
     def find_and_update_option(self, option):
         """Find and update an option with position-related data such as cost and quantity. 
 
@@ -420,7 +456,7 @@ class OptionPosition():
             _type_: returns None if no option found in position.
                     returns an Option object with cost and quantity updated accroding to position.
         """
-        for position in self.optionPositions:
+        for position in self.list:
             if position.get_id() == option.get_id():
                 return position
         
@@ -429,7 +465,7 @@ class OptionPosition():
     # Check if there are short call option of the given symbol in current postions
     def count_short_call_by_symbol(self, symbol):
         count = 0
-        for position in self.optionPositions:
+        for position in self.list:
             type = position.type
             positionType = position.get_position_type_str()
             if  position.symbol == symbol and type == 'call' and positionType == 'short':
@@ -440,7 +476,7 @@ class OptionPosition():
     # Count how many long call positions of given symbol 
     def count_long_call_by_symbol(self, symbol):
         count = 0
-        for position in self.optionPositions:
+        for position in self.list:
             type = position.type
             positionType = position.get_position_type_str()
             if  position.symbol == symbol and type == 'call' and positionType == 'long':
