@@ -350,6 +350,7 @@ class OptionPosition():
             option.cost = self.calculate_option_cost(option)
             self.list.append(option)
             
+            stock_price = float(rh.stocks.get_latest_price(option.symbol)[0])
             current_price = option.get_mark_price() * option.get_position_type()
             total_return = current_price * 100 * quantity - option.cum_cost
 
@@ -358,6 +359,7 @@ class OptionPosition():
                    'side': option.get_position_type_str(),
                    'exp': option.exp,
                    'strike': option.strike,
+                   'stock price': round(stock_price, 2),
                    'delta': option.get_delta(),
                    'theta': option.get_theta(),
                    'quantity': quantity,
@@ -636,6 +638,7 @@ def find_options_by_delta(symbol, exp, type, delta_min, delta_max):
     for option_rh in options_rh:
         # Fetch the greeks for the option
         optionData_tmp = rh.get_option_market_data_by_id(option_rh['id'])
+        if not optionData_tmp: continue # Skip this option if no market data can be found due to off-market hours.
         optionData = optionData_tmp[0]
         
         # Extract the delta value

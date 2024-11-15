@@ -105,6 +105,7 @@ class OptionTrader():
         
         shortCalls_df = self.positions.df.loc[self.positions.df['side'] == 'short']
         shortCalls_df.reset_index(drop=True, inplace=True)
+        
         print(shortCalls_df)
         
         if is_market_open_now() or self.mode == 'test':
@@ -232,7 +233,7 @@ class OptionTrader():
         logger.info(f'[{option.symbol}] Return percentage now is {return_pcnt}%')
 
         # Managing logic
-        if strike < stockPrice or self.mode == 'test':
+        if strike < stockPrice:
             logger.info(f'[{option.symbol}] This call is currently in the money!')
             if dte <= 1 and strike < 0.95*stockPrice or self.mode == 'test':
                 logger.info(f'[Action] Rolling this call to prevent assignment since call deep ITM and dte = {dte}.')
@@ -245,7 +246,7 @@ class OptionTrader():
             else:
                 logger.info(f'[Action] Too early for action. Do nothing.\n')
         else :
-            if return_rate > 0.95:
+            if return_rate > 0.95 or abs(price) <= 0.011 or self.mode == 'test':
                 logger.info(f'[Action] Rolling this call to start a new cc cycle since call gained >95% return. ')
                 option_to_roll = option.find_option_to_roll_by_delta(dte_delta=7, risk_level=self.risk_level, delta=self.delta)
                 status = None if option_to_roll == None else option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)

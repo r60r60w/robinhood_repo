@@ -17,7 +17,7 @@ symbol = 'GOOGL'
 '''
 def main():
     login(days=1)
-    mode = 'normal'
+    mode = 'test'
     trader = OptionTrader(['NVDA', 'TSLA', 'TSM'], mode)
     trader.run_cc('medium', MAX_ATTEMPT=3)
 
