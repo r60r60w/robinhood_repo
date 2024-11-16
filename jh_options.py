@@ -364,19 +364,19 @@ class OptionPosition():
                    'delta': option.get_delta(),
                    'theta': option.get_theta(),
                    'quantity': quantity,
-                   'current price': round(current_price, 2),
+                   'price': round(current_price, 2),
                    'total cost': round(option.cost, 2),
                    'total value': round(current_price * 100 * quantity, 2),
-                   'cumulative cost': round(option.cum_cost, 2),
-                   'cumulative return': round(total_return, 2),
-                   'Return percentage': f'{round(return_percentage, 2)}%'
+                   'cum. cost': round(option.cum_cost, 2),
+                   'cum. return': round(total_return, 2),
+                   'return %': f'{round(return_percentage, 2)}%'
                    }
             
             optionTable.append(row)
         
         self.df = pd.DataFrame(optionTable)
         self.df.sort_values(by='total value', inplace=True, ascending=False)   
-        columns_to_sum = ['total value', 'cumulative cost', 'cumulative return']
+        columns_to_sum = ['total value', 'cum. cost', 'cum. return']
         self.df.loc['sum', columns_to_sum] = self.df[columns_to_sum].sum()
 
     def get_all_positions(self):
