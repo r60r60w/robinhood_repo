@@ -235,7 +235,7 @@ class OptionTrader():
         # Managing logic
         if strike < stockPrice:
             logger.info(f'[{option.symbol}] This call is currently in the money!')
-            if dte <= 1 and strike < 0.95*stockPrice or self.mode == 'test':
+            if dte <= 1 and strike < 0.95*stockPrice:
                 logger.info(f'[Action] Rolling this call to prevent assignment since call deep ITM and dte = {dte}.')
                 option_to_roll = option.find_option_to_rollup_with_credit(dte_delta=7, risk_level=self.risk_level)
                 status = None if option_to_roll == None else option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)

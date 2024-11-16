@@ -353,6 +353,7 @@ class OptionPosition():
             stock_price = float(rh.stocks.get_latest_price(option.symbol)[0])
             current_price = option.get_mark_price() * option.get_position_type()
             total_return = current_price * 100 * quantity - option.cum_cost
+            return_percentage = (current_price * 100 * quantity - option.cost)/abs(option.cost)*100
 
             row = {'symbol': option.symbol,
                    'type': option.type,
@@ -364,16 +365,18 @@ class OptionPosition():
                    'theta': option.get_theta(),
                    'quantity': quantity,
                    'current price': round(current_price, 2),
+                   'total cost': round(option.cost, 2),
                    'total value': round(current_price * 100 * quantity, 2),
-                   'total cost': round(option.cum_cost, 2),
-                   'total return': round(total_return, 2)
+                   'cumulative cost': round(option.cum_cost, 2),
+                   'cumulative return': round(total_return, 2),
+                   'Return percentage': f'{round(return_percentage, 2)}%'
                    }
             
             optionTable.append(row)
         
         self.df = pd.DataFrame(optionTable)
         self.df.sort_values(by='total value', inplace=True, ascending=False)   
-        columns_to_sum = ['total value', 'total cost', 'total return']
+        columns_to_sum = ['total value', 'cumulative cost', 'cumulative return']
         self.df.loc['sum', columns_to_sum] = self.df[columns_to_sum].sum()
 
     def get_all_positions(self):
@@ -402,11 +405,13 @@ class OptionPosition():
         # Reset the index of dataframe
         df.reset_index(drop=True, inplace=True)
         
+        cost = 0
         for index, row in df.iterrows():
             if row['effect'] == 'open' and exp == row['exp'] and strike == row['strike'] and type == row['type']:
-                cost = abs(row['price']) * 100
-                if side == 'sell': cost = -1 * cost
-                break
+                cost_change = abs(row['price']) * row['quantity'] * 100
+                if side == 'sell': 
+                    cost_change = -1 * cost_change
+                cost = cost + cost_change
                    
         return cost                
      
@@ -433,7 +438,6 @@ class OptionPosition():
             if row['effect'] == 'open' and exp == row['exp'] and strike == row['strike'] and type == row['type']:
                 if row['strategy'].startswith('open'):
                     cost += -1 * row['premium']
-                    break
                 elif row['strategy'].startswith('roll'):
                     if row['strategy'].endswith('#0'):
                         cost += -1 * row['premium']
