@@ -130,7 +130,7 @@ class OptionTrader():
         # Check if there are enough securities to "cover" this call
         quantity = self.positions.get_covered_call_limit(symbol)
         if  quantity <= 0 and self.mode != 'test':
-            logger.info(f'{symbol}] Max covered call limit reached. No order placed.')
+            logger.info(f'[{symbol}] Max covered call limit reached. No order placed.')
             return None
     
         # Calculate expiration date
@@ -224,8 +224,8 @@ class OptionTrader():
         
         cost = option.cost
         price = option.get_mark_price() * option.get_position_type()
-        total_return = price * 100 - cost
         quantity = abs(option.quantity)
+        total_return = price * 100 * quantity - cost
         return_rate = total_return/abs(cost)       
         return_pcnt = round(return_rate * 100, 2)
         dte = (option.get_exp_dt().date() - dt.datetime.now().date()).days

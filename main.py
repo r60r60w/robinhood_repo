@@ -1,7 +1,4 @@
 #%%
-import datetime as dt
-import time
-import robin_stocks.robinhood as rh
 from jh_options import *
 from jh_utilities import *
 from jh_optionTrader import *
@@ -17,7 +14,7 @@ symbol = 'GOOGL'
 '''
 def main():
     login(days=1)
-    mode = 'test'
+    mode = 'normal'
     trader = OptionTrader(['GOOGL', 'INTC'], mode)
     trader.run_cc(risk_level='medium', delta=0.25, MAX_ATTEMPT=3)
 
@@ -28,7 +25,3 @@ def main():
 if __name__ == "__main__":
     main()
 
-#%%
-print('hello world')
-print('hello2')
-# %%
