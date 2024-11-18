@@ -28,13 +28,13 @@ class OptionTrader():
         # Determine if today is Monday
         logger.info('******** Running covered call strategy ********')
         logger.info('Place covered calls as position allows and manage cover calls')
-        logger.info('Your selected mode is ' + self.mode)
 
         self.risk_level = risk_level
         self.delta = delta
         self.MAX_ATTEMPT = MAX_ATTEMPT
         
         while True:
+            logger.info(f'Important parameters: mode = {self.mode}, delta = {delta}, risk level = {risk_level}.')
             self.place_short_calls_logic()      
             self.manage_short_calls_logic()
             logger.info('Wait for 5 min before starting new iteration.')
@@ -43,7 +43,7 @@ class OptionTrader():
     def place_short_calls_logic(self):
         """Place short calls as allowed by current position.
         """  
-        logger.info('**** Entering short call placing logic ****')
+        logger.info('\n**** Entering short call placing logic ****')
         shortCallOrder_rh_list = []
         todayDate_dt = dt.datetime.today().date()
         exp_dt = get_2nd_next_friday()
@@ -95,7 +95,7 @@ class OptionTrader():
         # Manage opened covered call positions
         # Gather all covered calls in positions
         # Run loop until no covered calls left in position.
-        logger.info('**** Entering short call managing logic ****')
+        logger.info('\n**** Entering short call managing logic ****')
         logger.info('Gathering all covered calls in current positions...')
         shortCalls = []
         self.positions.update() 

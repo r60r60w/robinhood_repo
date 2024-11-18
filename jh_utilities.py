@@ -27,6 +27,7 @@ def get_logger(name: str, log_to_file: bool = False, file_name: str = "app.log")
     
     return logger
 
+logger = get_logger(__name__, log_to_file=True, file_name="my_log_file.log")
 
 class EmptyListError(Exception):
     """Exception raised for errors in the input list being empty."""
@@ -43,7 +44,7 @@ def login(days):
                             by_sms=True,
                             store_session=True)
     profile = rh.profiles.load_user_profile()
-    print('-----Logged in to account belong to:', profile['first_name'], profile['last_name'], '-----')
+    logger.info(f'******** Successfully logged in to Robinhood account for {profile['first_name']} {profile['last_name']} ********')
 
 def logout():
     rh.authentication.logout()
