@@ -11,95 +11,117 @@ import yfinance as yf
 
 import pandas as pd
 #%%
-login(days=1)
+symbol = 'TSLA'
+stock = yf.Ticker(symbol)
+
+df = stock.history(period='5d', interval='5m')
+stock.history()
+
+# Apply the MACD calculation
+df = calculate_macd(df, short_window=12, long_window=26, signal_window=9)
+df = calculate_wilders_rsi(df, window=14)
+df = generate_signals(df, thresholds=[15,20,30])
+plot_signals(df, symbol)
+#exit()
 
 #%%
-optionPositions = OptionPosition()
-positions = optionPositions.get_all_positions()
-cost = optionPositions.calculate_option_cost(positions[6])
+#optionPositions = OptionPosition()
+#positions = optionPositions.get_all_positions()
+#cost = optionPositions.calculate_option_cost(positions[6])
 #%%
+import threading
+import time
+import random  # Simulate live price feed
 
-def process_option_orders_by_symbol(symbol):
-    """Process past option orders by symbol
+class TradingSignal:
+    """Encapsulates trading signals and synchronization."""
+    def __init__(self):
+        self.signal_event = threading.Event()  # Event to notify the main thread
+        self.signal = None  # Current trading signal (buy/sell/hold)
+        self.signal_lock = threading.Lock()  # Lock to protect signal access
 
-        Args:
-            symbol (_type_): string
+    def set_signal(self, signal):
+        """Set a new trading signal and notify."""
+        with self.signal_lock:
+            self.signal = signal
+            print(f"WorkerThread: Generated signal = {signal}. Notifying main thread.")
+            self.signal_event.set()  # Notify the main thread
 
-        Returns:
-            _type_: Pandas dataframe
-                    returns an dataframe with legs expanded 
-        """
-    all_orders_rh = rh.orders.get_all_option_orders()
-    filtered_orders_rh = [item for item in all_orders_rh if item['chain_symbol'] == symbol and item['state']== 'filled']
-    df = pd.DataFrame(filtered_orders_rh)
-    selected_columns = ['created_at', 'direction', 'legs', 'opening_strategy', 'closing_strategy', 'form_source', 'average_net_premium_paid', 'processed_premium', 'quantity']
-    df_selected = df[selected_columns]
-    expand_columns = ['time', 'strategy', 'effect', 'side', 'type', 'exp', 'strike', 'quantity', 'price', 'premium']
-    df_expand = pd.DataFrame(columns=expand_columns)
-    for index, row in df_selected.iterrows():
-        time = row['created_at']
-        time_dt = datetime.strptime(time, '%Y-%m-%dT%H:%M:%S.%fZ')
-        time_dt -= dt.timedelta(hours=7)
-        time = time_dt.strftime('%Y-%m-%d %H:%M')
-        quantity = float(row['quantity'])
-        for legIndex, leg in enumerate(row['legs']):
-            option_price = float(leg['executions'][0]['price'])
-            effect = leg['position_effect']
-            side = leg['side']
-            option_type = leg['option_type']
-            exp = leg['expiration_date']
-            strike = float(leg['strike_price'])
-            premium = option_price * quantity * 100
-            premium = -1 * premium if side == 'buy' else premium
-            if effect == 'open':
-                short_or_long = 'short' if side == 'sell' else 'long'
+    def get_signal(self):
+        """Retrieve the current signal."""
+        with self.signal_lock:
+            return self.signal
+
+    def reset_event(self):
+        """Reset the event after the signal is processed."""
+        self.signal_event.clear()
+
+# Worker thread that processes stock prices
+class StockAlgorithmThread(threading.Thread):
+    def __init__(self, trading_signal):
+        super().__init__()
+        self.trading_signal = trading_signal  # Shared TradingSignal object
+        self.running = True  # Control thread execution
+
+    def stop(self):
+        """Stop the thread gracefully."""
+        self.running = False
+
+    def run(self):
+        print("WorkerThread: Starting stock price analysis...")
+        while self.running:
+            time.sleep(1)  # Simulate live price feed delay
+            live_price = random.uniform(100, 200)  # Simulate live stock price
+            print(f"WorkerThread: Live price = {live_price}")
+
+            # Generate a buy/sell/hold signal based on some conditions
+            if live_price < 120:
+                self.trading_signal.set_signal("buy")
+            elif live_price > 180:
+                self.trading_signal.set_signal("sell")
             else:
-                short_or_long = 'short' if side == 'buy' else 'long'  
-                
-            if row['form_source'] == 'strategy_roll':
-                strategy = 'roll: ' + short_or_long+ ' ' + option_type + ' leg #' + str(legIndex)
-            else:
-                strategy = effect + ': ' + short_or_long + ' ' + option_type
+                self.trading_signal.set_signal("hold")
 
-            new_row = {'time': time, 
-                    'strategy': strategy,
-                        'effect': effect, 
-                        'side': side, 
-                        'type': option_type, 
-                        'exp': exp,
-                        'strike': strike,
-                        'quantity': quantity,
-                        'price': option_price,
-                        'premium': premium
-                        }
-            df_expand = pd.concat([df_expand, pd.DataFrame([new_row])], ignore_index=True)
-    df_expand['running_premium'] = df_expand.iloc[::-1]['premium'].cumsum()[::-1]
-    
-    # Process net cost for rolls
-    for index, row in df_expand.iterrows():
-        if row['strategy'][:4] == 'roll' and row['strategy'][-2:] == '#0':
-            next_row = df_expand.iloc[index+1]   
-            df_expand.at[index, 'premium'] += next_row['premium']
-            df_expand.at[index+1, 'premium'] = 0
+# Main trading logic
+def main():
+    trading_signal = TradingSignal()  # Shared trading signal object
 
-    # Filter short calls (covered calls)
-    mask = df_expand['strategy'].str.contains('short call')
-    df_sc = df_expand.loc[mask]
-    df_sc['running_premium']=df_sc.iloc[::-1]['premium'].cumsum()[::-1]
-    
-    # Filter long calls (leaps)
-    mask = df_expand['strategy'].str.contains('long call')
-    df_lc = df_expand.loc[mask]
-    df_lc['running_premium']=df_lc.iloc[::-1]['premium'].cumsum()[::-1]
-    
-    return df_expand, df_sc, df_lc
+    # Create and start the worker thread
+    stock_thread = StockAlgorithmThread(trading_signal)
+    stock_thread.start()
 
-#%% Export to Excel
-symbol = 'META'
-[df_expand, df_sc, df_lc] = process_option_orders_by_symbol(symbol)
-df_expand.to_excel(f'PnL_expanded_{symbol}.xlsx', index=False)
-df_sc.to_excel(f'PnL_cc_{symbol}.xlsx', index=False)
-df_lc.to_excel(f'PnL_lc_{symbol}.xlsx', index=False)
+    try:
+        while True:
+            # Check if a signal is set, without blocking
+            if trading_signal.signal_event.is_set():
+                signal = trading_signal.get_signal()
+
+                # Act on the received signal
+                if signal == "buy":
+                    print("MainThread: Placing a BUY order.")
+                elif signal == "sell":
+                    print("MainThread: Placing a SELL order.")
+                elif signal == "hold":
+                    print("MainThread: Holding position.")
+
+                # Reset the event after processing
+                trading_signal.reset_event()
+
+            # Perform other tasks in the meantime
+            print("MainThread: Performing background tasks...")
+            time.sleep(0.5)
+
+    except KeyboardInterrupt:
+        print("MainThread: Stopping the program...")
+        stock_thread.stop()
+        stock_thread.join()
+        print("MainThread: Program stopped.")
+
+if __name__ == "__main__":
+    main()
+
+
+
 #%%
 def send_email_notification(to_address, subject, body, attachment_path=None):
     # Email settings

@@ -16,6 +16,8 @@ class Option():
         self.quantity = 0
         self.cost = 0
         self.cum_cost = 0 # Cumulative cost considering option rolls.
+        self._volume = 0
+        self._OI = 0
         self._bid_price = 0
         self._ask_price = 0
         self._mark_price = 0
@@ -47,6 +49,8 @@ class Option():
         self._mark_price = round(float(option_rh['adjusted_mark_price']), 2)
         self._delta = round(float(option_rh['delta']), 4)
         self._theta = round(float(option_rh['theta']), 4)
+        self._volume = option_rh['volume']
+        self._OI = option_rh['open_interest']
         self.id = option_rh['id']
 
     def print(self):
@@ -119,7 +123,17 @@ class Option():
         if update:
             self.update()
         return self._theta
-
+    
+    def get_volume(self, update=False):
+        if update:
+            self.update()
+        return self._volume
+    
+    def get_OI(self, update=False):
+        if update:
+            self.update()
+        return self._OI
+    
     def find_option_to_roll_by_delta(self, dte_delta, risk_level, delta):
         """ Given the underlying option, find an option to roll to with given constraints.
             Returns the option with at least dte_delta more days till expiration and with the given delta and risk level.
@@ -302,8 +316,8 @@ class Option():
         spread = [leg1,leg2]
         order_rh = rh.orders.order_option_spread(debitOrCredit, round(abs(price),2), new_option.symbol, quantity, spread, jsonify=False)
         if order_rh.status_code >= 300 or order_rh.status_code < 200:
-            logger.info(f'[{self.symbol}] Failed to place order.')
-            logger.info(f'[{self.symbol}] Reason: {order_rh.json()['detail']}')
+            logger.info(f'[{self.symbol}] Failed to place order with status code {order_rh.status_code}.')
+            #logger.info(f'[{self.symbol}] Reason: {order_rh.json()['detail']}')
             return None
         else:
             logger.info(f'[{self.symbol}] Succesfully placed order with status code {order_rh.status_code}. Waiting for order to be filled...')
@@ -668,7 +682,9 @@ def create_dataframe_from_option_list(option_list):
                 'strike': option.strike,
                 'delta': option.get_delta(),
                 'theta': option.get_theta(),
-                'current price': round(option.get_mark_price(), 2)
+                'current price': round(option.get_mark_price(), 2),
+                'volume': option.get_volume(),
+                'open interest': option.get_OI()
                 }
         optionTable.append(row)
         

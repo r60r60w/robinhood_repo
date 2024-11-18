@@ -1,5 +1,4 @@
 import matplotlib.pyplot as plt
-from datetime import datetime
 
 # Calculate the MACD
 def calculate_macd(data, short_window=12, long_window=26, signal_window=9):
@@ -36,7 +35,6 @@ def calculate_wilders_rsi(data, window=14):
     return data
 
 
-
 # Function to plot closing prices, MACD, RSI, signals, and portfolio value with time ticks on x-axis
 def plot_signals(df, symbol):
     plt.figure(figsize=(14, 12))
@@ -47,29 +45,46 @@ def plot_signals(df, symbol):
     plt.subplot(3, 1, 1)
     plt.plot(x_axis, df['Close'], label='Close Price')
 
+    def plot_with_dashed_lines(signal_df, signal_type, color, marker, label):
+        """Helper function to plot markers with dashed vertical lines."""
+        first_marker = True  # Track if this is the first marker for the label
+        for idx, row in signal_df.iterrows():
+            x = df.index.get_loc(idx)  # Convert DataFrame index to x-axis position
+            y = row['Close']  # Get the y-value (price)
+
+            # Add a vertical dashed line
+            plt.axvline(x=x, linestyle='--', color=color, alpha=0.6)
+
+            # Add the marker with the label only for the first instance
+            if first_marker:
+                plt.scatter(x, y, marker=marker, color=color, label=label, alpha=1)
+                first_marker = False
+            else:
+                plt.scatter(x, y, marker=marker, color=color, alpha=1)
+
     # Plot weak buy signals
     weak_buy_signals = df[df['buy_signal'] == 1]
-    plt.scatter(weak_buy_signals.index.map(df.index.get_loc), weak_buy_signals['Close'], marker='^', color='lightgreen', label='Weak Buy Signal', alpha=1)
+    plot_with_dashed_lines(weak_buy_signals, "buy", "lightgreen", '^', "Weak Buy Signal")
 
     # Plot medium buy signals
     medium_buy_signals = df[df['buy_signal'] == 2]
-    plt.scatter(medium_buy_signals.index.map(df.index.get_loc), medium_buy_signals['Close'], marker='^', color='g', label='Medium Buy Signal', alpha=1)
+    plot_with_dashed_lines(medium_buy_signals, "buy", "g", '^', "Medium Buy Signal")
 
     # Plot strong buy signals
     strong_buy_signals = df[df['buy_signal'] == 3]
-    plt.scatter(strong_buy_signals.index.map(df.index.get_loc), strong_buy_signals['Close'], marker='^', color='blue', label='Strong Buy Signal', alpha=1)
+    plot_with_dashed_lines(strong_buy_signals, "buy", "blue", '^', "Strong Buy Signal")
 
     # Plot weak sell signals
     weak_sell_signals = df[df['sell_signal'] == 1]
-    plt.scatter(weak_sell_signals.index.map(df.index.get_loc), weak_sell_signals['Close'], marker='v', color='r', label='Weak Sell Signal', alpha=1)
+    plot_with_dashed_lines(weak_sell_signals, "sell", "r", 'v', "Weak Sell Signal")
 
     # Plot medium sell signals
     medium_sell_signals = df[df['sell_signal'] == 2]
-    plt.scatter(medium_sell_signals.index.map(df.index.get_loc), medium_sell_signals['Close'], marker='v', color='orange', label='Medium Sell Signal', alpha=1)
+    plot_with_dashed_lines(medium_sell_signals, "sell", "orange", 'v', "Medium Sell Signal")
 
     # Plot strong sell signals
     strong_sell_signals = df[df['sell_signal'] == 3]
-    plt.scatter(strong_sell_signals.index.map(df.index.get_loc), strong_sell_signals['Close'], marker='v', color='darkred', label='Strong Sell Signal', alpha=1)
+    plot_with_dashed_lines(strong_sell_signals, "sell", "darkred", 'v', "Strong Sell Signal")
 
     plt.title(f'{symbol} Closing Price, MACD, RSI, Buy and Sell Signals')
     plt.legend()
@@ -97,20 +112,17 @@ def plot_signals(df, symbol):
     tick_labels = [df.index[i].strftime('%Y-%m-%d') for i in ticks]
     plt.xticks(ticks, tick_labels, rotation=45)
 
-
     # Save the plot to a file
- #   timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
     plt.savefig(f'{symbol}.png')
-    
     plt.show()
 
-def generate_signals(data):
+def generate_signals(data, thresholds = [15, 20, 25]):
     data['buy_signal'] = 0
     data['sell_signal'] = 0
 
     for i in range(1, len(data)):
         # Check for Strong Buy signal: RSI < 15
-        if data['rsi'].iloc[i] < 15:
+        if data['rsi'].iloc[i] < thresholds[0]:
             for j in range(i + 1, len(data)):
                 if (data['macd'].iloc[j] > data['signal_line'].iloc[j] and 
                     data['macd'].iloc[j-1] <= data['signal_line'].iloc[j-1] and 
@@ -120,7 +132,7 @@ def generate_signals(data):
                     break  # Break after setting the signal
         
         # Check for Medium Buy signal: RSI < 20
-        elif data['rsi'].iloc[i] < 20:
+        elif data['rsi'].iloc[i] < thresholds[1]:
             for j in range(i + 1, len(data)):
                 if (data['macd'].iloc[j] > data['signal_line'].iloc[j] and 
                     data['macd'].iloc[j-1] <= data['signal_line'].iloc[j-1] and 
@@ -130,7 +142,7 @@ def generate_signals(data):
                     break  # Break after setting the signal
 
         # Check for Weak Buy signal: RSI < 25
-        elif data['rsi'].iloc[i] < 25:
+        elif data['rsi'].iloc[i] < thresholds[2]:
             for j in range(i + 1, len(data)):
                 if (data['macd'].iloc[j] > data['signal_line'].iloc[j] and 
                     data['macd'].iloc[j-1] <= data['signal_line'].iloc[j-1] and 
@@ -140,7 +152,7 @@ def generate_signals(data):
                     break  # Break after setting the signal
 
         # Check for Strong Sell signal: RSI > 85
-        if data['rsi'].iloc[i] > 85:
+        if data['rsi'].iloc[i] > 100-thresholds[0]:
             for j in range(i + 1, len(data)):
                 if (data['macd'].iloc[j] < data['signal_line'].iloc[j] and 
                     data['macd'].iloc[j-1] >= data['signal_line'].iloc[j-1] and 
@@ -150,7 +162,7 @@ def generate_signals(data):
                     break  # Break after setting the signal
         
         # Check for Medium Sell signal: RSI > 80
-        elif data['rsi'].iloc[i] > 80:
+        elif data['rsi'].iloc[i] > 100-thresholds[1]:
             for j in range(i + 1, len(data)):
                 if (data['macd'].iloc[j] < data['signal_line'].iloc[j] and 
                     data['macd'].iloc[j-1] >= data['signal_line'].iloc[j-1] and 
@@ -160,7 +172,7 @@ def generate_signals(data):
                     break  # Break after setting the signal
         
         # Check for Weak Sell signal: RSI > 75
-        elif data['rsi'].iloc[i] > 75:
+        elif data['rsi'].iloc[i] > 100-thresholds[2]:
             for j in range(i + 1, len(data)):
                 if (data['macd'].iloc[j] < data['signal_line'].iloc[j] and 
                     data['macd'].iloc[j-1] >= data['signal_line'].iloc[j-1] and 

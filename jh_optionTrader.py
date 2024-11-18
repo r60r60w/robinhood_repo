@@ -110,7 +110,8 @@ class OptionTrader():
         
         if is_market_open_now() or self.mode == 'test':
             for option in shortCalls:
-                self.manage_short_call(option) 
+                if option.symbol in self.symbol_list:
+                    self.manage_short_call(option) 
         else:
             logger.info('Market is closed now.')
         
@@ -128,8 +129,8 @@ class OptionTrader():
         logger.info(f'Openning short call for {symbol} with {dte} days till expiration')
         # Check if there are enough securities to "cover" this call
         quantity = self.positions.get_covered_call_limit(symbol)
-        if  quantity <= 0:
-            logger.info('Max covered call limit reached. No order placed.')
+        if  quantity <= 0 and self.mode != 'test':
+            logger.info(f'{symbol}] Max covered call limit reached. No order placed.')
             return None
     
         # Calculate expiration date
@@ -139,41 +140,49 @@ class OptionTrader():
         # Define profit floor and ceiling
         delta_min = 0.05
         delta_max = self.delta if self.delta > delta_min+0.05 else delta_min+0.05
-        logger.info(f'Looking for calls to sell with delta between {delta_min} and {delta_max}, expiring on {exp}')
+        logger.info(f'[{symbol}] Looking for calls with delta between {delta_min} and {delta_max}, expiring on {exp}')
 
         # Find potential options
         try: 
-            [potentialOptions, potentialOptions_df] = find_options_by_delta(symbol, exp, 'call', delta_min, delta_max)
+            matchingOptions = find_options_by_delta(symbol, exp, 'call', delta_min, delta_max)
         except EmptyListError as e:
-            logger.error(f"No option found matching the given delta range: {e}")
+            logger.error(f"[{symbol}] No option found matching the given delta range: {e}")
             return None
 
         # Print potential options
-        logger.info('Found these options matching criteria:')
-        print(potentialOptions_df)
+        matchingOptions_df = create_dataframe_from_option_list(matchingOptions)
+
+        # Add a column to show potential credit earned if filled.
+        for index, row in matchingOptions_df.iterrows():
+            matchingOptions_df.at[index, 'credit estimate'] = 100*row['current price']
+            
+        # Print potential options
+        logger.info(f'[{symbol}] Found these options candidates to sell:')
+        print(matchingOptions_df)  
 
         # Select option based on risk level
         if self.risk_level == 'low':
-            selectedOption = potentialOptions[0]
+            selectedOption = matchingOptions[0]
         elif self.risk_level == 'medium':
-            mid_index = len(potentialOptions) // 2
-            selectedOption = potentialOptions[mid_index]
+            mid_index = len(matchingOptions) // 2
+            selectedOption = matchingOptions[mid_index]
         elif self.risk_level == 'high':
-            selectedOption = potentialOptions[-1]
+            selectedOption = matchingOptions[-1]
 
-        logger.info(f'Selected option [{potentialOptions.index(selectedOption)}].')
+        logger.info(f'[{symbol}] Selected option [{matchingOptions.index(selectedOption)}].')
 
         # Check if the order already exists in currrent open orders
-        logger.info('Checking if this option is already in open orders')
+        logger.info(f'[{symbol}] Checking if this option is already in open orders')
         if is_option_in_open_orders(selectedOption):
-            logger.info('This order already exists in current open orders. Order not placed.')
+            logger.info(f'[{symbol}] This order already exists in current open orders. Order not placed.')
             return None
 
 
         # Calculate limit price
         limit_price = selectedOption.get_limit_price(price_ratio, update=True)
-        logger.info(f'Opening a limit order to sell at ${limit_price}...')
-
+        logger.info(f'[{symbol}] Attempt to place a STO order:')
+        logger.info(f'[{symbol}] exp: {selectedOption.exp}, strike: {selectedOption.strike}')
+        logger.info(f'[{symbol}] credit: ${round(limit_price*100, 2)}.')
         #TODO: Contunue from here, think about how to wrap sell_option
         # Place sell order
         order_rh = rh.order_sell_option_limit(
@@ -190,18 +199,12 @@ class OptionTrader():
         )
         
         if order_rh.status_code >= 300 or order_rh.status_code < 200:
-             logger.info('Failed to place order.')
-             logger.info(f'Reason: {order_rh.json()['detail']}')
+             logger.info(f'[{symbol}] Failed to place order with status code {order_rh.status_code}.')
+#             logger.info(f'{symbol}] Reason: {order_rh.json()['detail']}')
              return None
         else:
-            logger.info(f'Succesfully placed order with status code {order_rh.status_code}.')
+            logger.info(f'[{symbol}] Succesfully placed order with status code {order_rh.status_code}.')
              
-        logger.info('Order placed with the following information:')
-        logger.info(f'Symbol: {selectedOption.symbol}')
-        logger.info(f'Exp date: {selectedOption.exp}')
-        logger.info(f'Strike Price: {selectedOption.strike}')
-        logger.info(f'Premium to be collected if filled: ${round(limit_price*100, 2)}')
-        logger.info(f'Premium to be collected if filled (should match above): ${order_rh['premium']}')
         return order_rh
 
     def manage_short_call(self, option):
