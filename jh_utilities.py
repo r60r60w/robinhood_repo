@@ -2,6 +2,7 @@ import robin_stocks.robinhood as rh
 import datetime as dt
 import config
 import logging
+import yagmail
 
 # Configure logging settings for console output
 logging.basicConfig(
@@ -121,4 +122,20 @@ def get_2nd_next_friday():
 
     return second_next_friday
 
+def send_email_notification(to_address, subject, body, attachment_path=None):
+    # Email settings
+    email_address = 'r60r60w@gmail.com'
+    app_password = 'sffl xnzq nekx jvio'
+    # Initialize yagmail
+    yag = yagmail.SMTP(email_address, app_password)
+    # Prepare email contents
+    contents = [body]
+    if attachment_path:
+        contents.append(attachment_path)
 
+    # Send the email
+    try:
+        yag.send(to=to_address, subject=subject, contents=contents)
+        print_with_time('Email sent successfully', file="log.txt")
+    except Exception as e:
+        print_with_time(f'Failed to send email: {e}', file="log.txt")

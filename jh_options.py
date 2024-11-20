@@ -5,7 +5,7 @@ import pandas as pd
 import math
 from jh_utilities import *
 #logger = get_logger(__name__)
-logger = get_logger(__name__, log_to_file=True, file_name="my_log_file.log")
+logger = get_logger(__name__, log_to_file=False, file_name="my_log_file.log")
 
 class Option():
     def __init__(self, symbol, exp, strike, type):
@@ -21,9 +21,9 @@ class Option():
         self._bid_price = 0
         self._ask_price = 0
         self._mark_price = 0
-        self._delta = None
-        self._theta = None
-        self.id = None # To be updated by the below method
+        self._delta = 0
+        self._theta = 0
+        self.id = 0 # To be updated by the below method
         self.update()
 
     def get_option_rh(self): 
@@ -39,7 +39,9 @@ class Option():
             options_rh = self.get_option_rh()
             
         except EmptyListError as e:
-            logger.error(f"No option found: {e}")
+            body = f"No option found: {e} for {self.symbol}, {self.exp}, {self.strike}."
+            logger.error(body)
+            send_email_notification(to_address=self.address, subject=f"Error Received", body=body)
             return
         else:
             option_rh = options_rh[0]
@@ -247,90 +249,6 @@ class Option():
     
         return selectedOption
 
-    def roll_option_ioc(self, new_option, position_type, quantity=1, mode='normal'):
-        """Place an order to roll the underlying option to a new option .
-        The order will be canceled if not filled in 2 minuntes.
-        :param new_option: The option to roll to
-        :type new_option: Option 
-        :param position_type: long or short.
-        :type position_type: str
-        :param quantity: the number of options to roll.
-        :type quantity: int
-        :param mode: Normal mode or test mode
-        :type mode: Optional[str]
-        
-        :returns: order_rh if order successful filled. Otherwise, returns None.
-        """ 
-        # Check if this option (self) is in position
-        optionPositions = OptionPosition()
-        old_option = optionPositions.find_and_update_option(self)
-        if old_option == None:
-            logger.info('Option to roll is not in position.')
-            return None
-
-        # Check if the underlying stock is the same
-        if old_option.symbol != new_option.symbol:
-            logger.info("The two options are not of the same underlying.")
-            return None
-
-        # Check if the option type is the same
-        if old_option.type != new_option.type:
-            logger.info("The two options are not of the same type. Need to be the same type for rolling.")
-            return None
-
-        old_limit_price = old_option.get_limit_price(update=True)
-        new_limit_price = new_option.get_limit_price(update=True)
-
-        if position_type == "long":
-            price = new_limit_price - old_limit_price
-            action1 = "sell"
-            action2 = "buy"
-        elif position_type == "short":
-            price = old_limit_price - new_limit_price
-            action1 = "buy"
-            action2 = "sell"
-        else:
-            print("Invalid position type. Position type should be either long or short")
-            return None
-
-        debitOrCredit = "debit" if price > 0 else "credit"
-
-        leg1 = {"expirationDate": old_option.exp,
-                "strike": old_option.strike,
-                "optionType": old_option.type,
-                "effect":"close",
-                "action": action1,
-                "ratio_quantity": 1}
-
-        leg2 = {"expirationDate": new_option.exp,
-                "strike": new_option.strike,
-                "optionType": new_option.type,
-                "effect":"open",
-                "action": action2,
-                "ratio_quantity": 1}
-
-        logger.info(f'[{self.symbol}] Attempt to place an order to roll:')
-        logger.info(f'[{self.symbol}] from exp: {old_option.exp}, strike: {old_option.strike}')
-        logger.info(f'[{self.symbol}] to   exp: {new_option.exp}, strike: {new_option.strike}')
-        logger.info(f'[{self.symbol}] with credit: ${round(-1*price*100,2)}.')
-        spread = [leg1,leg2]
-        order_rh = rh.orders.order_option_spread(debitOrCredit, round(abs(price),2), new_option.symbol, quantity, spread, jsonify=False)
-        if order_rh.status_code >= 300 or order_rh.status_code < 200:
-            logger.info(f'[{self.symbol}] Failed to place order with status code {order_rh.status_code}.')
-            #logger.info(f'[{self.symbol}] Reason: {order_rh.json()['detail']}')
-            return None
-        else:
-            logger.info(f'[{self.symbol}] Succesfully placed order with status code {order_rh.status_code}. Waiting for order to be filled...')
-            
-        # Cancel order after waiting for 2 min 
-        time.sleep(120) if mode != 'test' else time.sleep(0)
-        pendingOrders = rh.orders.get_all_open_option_orders()
-        for pendingOrder in pendingOrders:
-            if order_rh.json()['id'] == pendingOrder['id']:
-                rh.orders.cancel_option_order(pendingOrder['id'])
-                logger.info(f"[{self.symbol}] Order cancelled since it is not filled after 2 min.")
-                order_rh = None
-        return order_rh
 
 
 class OptionPosition():

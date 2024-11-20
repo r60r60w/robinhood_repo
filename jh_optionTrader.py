@@ -3,18 +3,104 @@ import time
 import robin_stocks.robinhood as rh
 from jh_utilities import *
 from jh_options import *
+from technical_indicator import *
+import yfinance as yf
+import threading
 #logger = get_logger(__name__)
-logger = get_logger(__name__, log_to_file=True, file_name="my_log_file.log")
+logger = get_logger(__name__, log_to_file=False, file_name="my_log_file.log")
+
+class TradingSignal:
+    """Encapsulates trading signals and synchronization."""
+    def __init__(self):
+        self.signal_event = threading.Event()  # Event to notify the main thread
+        self.signal = 0 # Current trading signal wiith -3/-2/-1/0/1/2/3 corresponding to
+                        # strong sell/medium sell/weak sell/hold/weak buy/medium buy/strong buy)
+        self.signal_lock = threading.Lock()  # Lock to protect signal access
+
+    def set_signal(self, signal):
+        """Set a new trading signal and notify."""
+        with self.signal_lock:
+            self.signal = signal
+            logger.info(f"WorkerThread: Generated signal = {signal}. Notifying main thread.")
+            self.signal_event.set()  # Notify the main thread
+
+    def get_signal(self):
+        """Retrieve the current signal."""
+        with self.signal_lock:
+            return self.signal
+
+    def reset_event(self):
+        """Reset the event after the signal is processed."""
+        self.signal_event.clear()
+        
+class StockAlgorithmThread(threading.Thread):
+    def __init__(self, symbol, trading_signal, generate_plot=False):
+        super().__init__()
+        self.symbol = symbol
+        self.generate_plot = generate_plot
+        self.trading_signal = trading_signal  # Shared TradingSignal object
+        self.running = True  # Control thread execution
+
+    def stop(self):
+        """Stop the thread gracefully."""
+        self.running = False
+
+    def run(self):
+        logger.info(f"[{self.symbol}] WorkerThread: Starting stock price analysis...")
+        while self.running:
+            stock = yf.Ticker(self.symbol)
+            #df = yf.download(symbol, period='5d', interval='5m')
+            df = stock.history(period='5d', interval='5m')
+
+            # Apply the MACD calculation and Wilder's RSI indicator
+            df = calculate_macd(df, short_window=12, long_window=26, signal_window=9)
+            df = calculate_wilders_rsi(df, window=14)
+            df = generate_signals(df)
+            
+            if self.generate_plot:
+                plot_signals(df, self.symbol)
+                
+            live_price = df.iloc[-1]['Close']
+            print(f"[{self.symbol}] WorkerThread: Live price = {live_price}")
+
+            # Generate a buy/sell/hold signal based on some conditions
+            if df.iloc[-1]['buy_signal'] == 1 or self.mode == 'test':
+                logger.info(f"[{self.symbol}] Weak buy signal detected.")
+                self.trading_signal.set_signal(1)
+            elif df.iloc[-1]['buy_signal'] == 2:
+                logger.info(f"[{self.symbol}] Medium buy signal detected.")
+                self.trading_signal.set_signal(2)
+            elif df.iloc[-1]['buy_signal'] == 3:
+                logger.info(f"[{self.symbol}] Strong buy signal detected.")
+                self.trading_signal.set_signal(3)
+            else:
+                logger.info(f"[{self.symbol}] No buy signal detected.")
+                
+            if df.iloc[-1]['sell_signal'] == 1 or self.mode == 'test':
+                logger.info(f"[{self.symbol}] Weak sell signal detected.")
+                self.trading_signal.set_signal(-1)
+            elif df.iloc[-1]['sell_signal'] == 2:
+                logger.info(f"[{self.symbol}] Medium sell signal detected.")
+                self.trading_signal.set_signal(-2)
+            elif df.iloc[-1]['sell_signal'] == 3:
+                logger.info(f"[{self.symbol}] Strong sell signal detected.")
+                self.trading_signal.set_signal(-3)
+            else:
+                logger.info(f"[{self.symbol}] No sell signal detected.")
+            
+            time.sleep(300) if self.mode != 'test' else time.sleep(0)
+    
 
 
 class OptionTrader():
-    def __init__(self, symbol_list, mode, risk_level='low', delta=0.2, MAX_ATTEMPT=5) -> None:
+    def __init__(self, symbol_list, mode, risk_level='low', delta=0.2, MAX_ATTEMPT=5, address='r60r60w@gmail.com') -> None:
         self.positions = OptionPosition()
         self.symbol_list = symbol_list
         self.mode = mode
         self.risk_level = risk_level
         self.delta = delta
         self.MAX_ATTEMPT = MAX_ATTEMPT
+        self.address = address
 
     def print_all_positions(self):
         self.positions.print_all_positions()
@@ -32,13 +118,26 @@ class OptionTrader():
         self.risk_level = risk_level
         self.delta = delta
         self.MAX_ATTEMPT = MAX_ATTEMPT
+
+        # Create and start the worker thread
+        # stock_threads = {key: None for key in self.symbol_list}
+        # trading_signals = {key: TradingSignal() for key in self.symbol_list}  # Shared trading signal objects
+        # for symbol in self.symbol_list:
+        #     stock_threads[symbol] = StockAlgorithmThread(symbol, trading_signals[symbol], generate_plot=False)
+        #     stock_threads[symbol].start()
+        try: 
+            while True:
+                logger.info(f'Important parameters: mode = {self.mode}, delta = {delta}, risk level = {risk_level}.')
+                self.place_short_calls_logic()      
+                self.manage_short_calls_logic()
+                minutes = 10
+                logger.info(f'Wait for {minutes} min before starting new iteration.')
+                time.sleep(minutes*60) if self.mode != 'test' else time.sleep(0)
+        except KeyboardInterrupt:
+            logger.info("Keyboard Interrupt Received: Stopping the program...")
+            
+
         
-        while True:
-            logger.info(f'Important parameters: mode = {self.mode}, delta = {delta}, risk level = {risk_level}.')
-            self.place_short_calls_logic()      
-            self.manage_short_calls_logic()
-            logger.info('Wait for 5 min before starting new iteration.')
-            time.sleep(300) if self.mode != 'test' else time.sleep(0)
             
     def place_short_calls_logic(self):
         """Place short calls as allowed by current position.
@@ -198,12 +297,16 @@ class OptionTrader():
             jsonify=False
         )
         
-        if order_rh.status_code >= 300 or order_rh.status_code < 200:
+        if self.mode != 'test' and order_rh.status_code >= 300 or order_rh.status_code < 200:
              logger.info(f'[{symbol}] Failed to place order with status code {order_rh.status_code}.')
 #             logger.info(f'{symbol}] Reason: {order_rh.json()['detail']}')
              return None
         else:
-            logger.info(f'[{symbol}] Succesfully placed order with status code {order_rh.status_code}.')
+            logger.info(f'[{symbol}] Succesfully placed order with status code {order_rh.status_code}. Waiting for order to be filled...')
+            logger.info('Sending email notification.')
+            body = f"Succesfully placed STO for {symbol} with \
+                exp: {selectedOption.exp}, strike: {selectedOption.strike}, credit: ${round(limit_price*100, 2)}"
+            send_email_notification(to_address=self.address, subject=f"[{symbol}] STO Order Placed", body=body)
              
         return order_rh
 
@@ -214,7 +317,9 @@ class OptionTrader():
         # Check if the short call exists in open positions
         option = self.positions.find_and_update_option(option)
         if option == None:
-            logger.critical(f'[{option.symbol}] The short option to close is not open in your account. Option not closed.')
+            body = f'[{option.symbol}] The short option to close is not open in your account. Option not closed.'
+            logger.critical(body)
+            send_email_notification(to_address=self.address, subject=f"Error Received", body=body)
             return None
             
         # Check if the short call is in open orders
@@ -241,22 +346,109 @@ class OptionTrader():
             if dte <= 1 and strike < 0.95*stockPrice:
                 logger.info(f'[Action] Rolling this call to prevent assignment since call deep ITM and dte = {dte}.')
                 option_to_roll = option.find_option_to_rollup_with_credit(dte_delta=7, risk_level=self.risk_level)
-                status = None if option_to_roll == None else option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
+                status = None if option_to_roll == None else self.roll_option_ioc(option, option_to_roll, 'short', quantity, mode=self.mode)
             elif dte == 0 and strike >= 0.95*stockPrice:
                 logger.info(f'[Action] Rolling this call to prevent assignment since call ITM and it expires today.')
                 option_to_roll = option.find_option_to_rollup_with_credit(dte_delta=7, risk_level=self.risk_level)
-                status = None if option_to_roll == None else option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
+                status = None if option_to_roll == None else self.roll_option_ioc(option, option_to_roll, 'short', quantity, mode=self.mode)
             else:
                 logger.info(f'[Action] Too early for action. Do nothing.\n')
         else :
             if return_rate > 0.95 or abs(price) <= 0.011 or self.mode == 'test':
                 logger.info(f'[Action] Rolling this call to start a new cc cycle since call gained >95% return. ')
                 option_to_roll = option.find_option_to_roll_by_delta(dte_delta=7, risk_level=self.risk_level, delta=self.delta)
-                status = None if option_to_roll == None else option.roll_option_ioc(option_to_roll, 'short', quantity, mode=self.mode)
+                status = None if option_to_roll == None else self.roll_option_ioc(option, option_to_roll, 'short', quantity, mode=self.mode)
             else:
                 logger.info(f'[Action] Too early for action. Do nothing.\n')
         return status
 
-    
+    def roll_option_ioc(self, old_option, new_option, position_type, quantity=1, mode='normal'):
+        """Place an order to roll the underlying option to a new option .
+        The order will be canceled if not filled in 2 minuntes.
+        :param new_option: The option to roll to
+        :type new_option: Option 
+        :param position_type: long or short.
+        :type position_type: str
+        :param quantity: the number of options to roll.
+        :type quantity: int
+        :param mode: Normal mode or test mode
+        :type mode: Optional[str]
         
-        
+        :returns: order_rh if order successful filled. Otherwise, returns None.
+        """ 
+        # Check if the old option is in position
+        optionPositions = OptionPosition()
+        old_option = optionPositions.find_and_update_option(old_option)
+        if old_option == None:
+            logger.info(f'[{old_option.symbol}] Option to roll is not in position.')
+            return None
+
+        # Check if the underlying stock is the same
+        if old_option.symbol != new_option.symbol:
+            logger.info(f"[{old_option.symbol}] The two options are not of the same underlying.")
+            return None
+
+        # Check if the option type is the same
+        if old_option.type != new_option.type:
+            logger.info(f"[{old_option.symbol}] The two options are not of the same type. Need to be the same type for rolling.")
+            return None
+
+        old_limit_price = old_option.get_limit_price(update=True)
+        new_limit_price = new_option.get_limit_price(update=True)
+
+        if position_type == "long":
+            price = new_limit_price - old_limit_price
+            action1 = "sell"
+            action2 = "buy"
+        elif position_type == "short":
+            price = old_limit_price - new_limit_price
+            action1 = "buy"
+            action2 = "sell"
+        else:
+            print(f"[{old_option.symbol}] Invalid position type. Position type should be either long or short")
+            return None
+
+        debitOrCredit = "debit" if price > 0 else "credit"
+
+        leg1 = {"expirationDate": old_option.exp,
+                "strike": old_option.strike,
+                "optionType": old_option.type,
+                "effect":"close",
+                "action": action1,
+                "ratio_quantity": 1}
+
+        leg2 = {"expirationDate": new_option.exp,
+                "strike": new_option.strike,
+                "optionType": new_option.type,
+                "effect":"open",
+                "action": action2,
+                "ratio_quantity": 1}
+
+        logger.info(f'[{old_option.symbol}] Attempt to place an order to roll:')
+        logger.info(f'[{old_option.symbol}] from exp: {old_option.exp}, strike: {old_option.strike}')
+        logger.info(f'[{old_option.symbol}] to   exp: {new_option.exp}, strike: {new_option.strike}')
+        logger.info(f'[{old_option.symbol}] with credit: ${round(-1*price*100,2)}.')
+        spread = [leg1,leg2]
+        order_rh = rh.orders.order_option_spread(debitOrCredit, round(abs(price),2), new_option.symbol, quantity, spread, jsonify=False)
+        if order_rh.status_code >= 300 or order_rh.status_code < 200:
+            logger.info(f'[{old_option.symbol}] Failed to place order with status code {order_rh.status_code}.')
+            #logger.info(f'[{self.symbol}] Reason: {order_rh.json()['detail']}')
+            return None
+        else:
+            logger.info(f'[{old_option.symbol}] Succesfully placed order with status code {order_rh.status_code}. Waiting for order to be filled...')
+            logger.info('Sending email notification.')
+            body = f"Succesfully placed roll order for {old_option.symbol}:\n \
+                from exp: {old_option.exp}, strike: {old_option.strike} \n\
+                to   exp: {new_option.exp}, strike: {new_option.strike} \n \
+                with credit: ${round(-1*price*100,2)}"
+            send_email_notification(to_address=self.address, subject=f"[{old_option.symbol}] Roll Order Placed", body= body)
+            
+        # Cancel order after waiting for 2 min 
+        time.sleep(120) if mode != 'test' else time.sleep(0)
+        pendingOrders = rh.orders.get_all_open_option_orders()
+        for pendingOrder in pendingOrders:
+            if order_rh.json()['id'] == pendingOrder['id']:
+                rh.orders.cancel_option_order(pendingOrder['id'])
+                logger.info(f"[{old_option.symbol}] Order cancelled since it is not filled after 2 min.")
+                order_rh = None
+        return order_rh

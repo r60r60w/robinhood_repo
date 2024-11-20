@@ -7,7 +7,7 @@ from jh_utilities import *
 from jh_optionTrader import *
 from technical_indicator import *
 import yfinance as yf
-#import yagmail
+import yagmail
 
 import pandas as pd
 #%%
