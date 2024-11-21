@@ -1,14 +1,14 @@
 import datetime as dt       
-import time
 import robin_stocks.robinhood as rh
 from jh_utilities import *
 from jh_options import *
 from technical_indicator import *
 import yfinance as yf
-import threading
+#import threading
 #logger = get_logger(__name__)
 logger = get_logger(__name__, log_to_file=False, file_name="my_log_file.log")
 
+'''
 class TradingSignal:
     """Encapsulates trading signals and synchronization."""
     def __init__(self):
@@ -89,8 +89,7 @@ class StockAlgorithmThread(threading.Thread):
                 logger.info(f"[{self.symbol}] No sell signal detected.")
             
             time.sleep(300) if self.mode != 'test' else time.sleep(0)
-    
-
+'''
 
 class OptionTrader():
     def __init__(self, symbol_list, mode, risk_level='low', delta=0.2, MAX_ATTEMPT=5, address='r60r60w@gmail.com') -> None:
@@ -125,16 +124,17 @@ class OptionTrader():
         # for symbol in self.symbol_list:
         #     stock_threads[symbol] = StockAlgorithmThread(symbol, trading_signals[symbol], generate_plot=False)
         #     stock_threads[symbol].start()
-        try: 
-            while True:
-                logger.info(f'Important parameters: mode = {self.mode}, delta = {delta}, risk level = {risk_level}.')
-                self.place_short_calls_logic()      
-                self.manage_short_calls_logic()
-                minutes = 10
-                logger.info(f'Wait for {minutes} min before starting new iteration.')
-                time.sleep(minutes*60) if self.mode != 'test' else time.sleep(0)
-        except KeyboardInterrupt:
-            logger.info("Keyboard Interrupt Received: Stopping the program...")
+        #try: 
+        while True:
+            logger.info(f'Important parameters: mode = {self.mode}, delta = {delta}, risk level = {risk_level}.')
+            self.place_short_calls_logic()      
+            self.manage_short_calls_logic()
+            minutes = 5
+            logger.info(f'Wait for {minutes} min before starting new iteration.')
+            tracked_sleep(minutes*60) if self.mode != 'test' else tracked_sleep(0)
+                
+        #except KeyboardInterrupt:
+        #    logger.info("Keyboard Interrupt Received: Stopping the program...")
             
 
         

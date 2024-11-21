@@ -3,6 +3,7 @@ import datetime as dt
 import config
 import logging
 import yagmail
+import time
 
 # Configure logging settings for console output
 logging.basicConfig(
@@ -53,6 +54,8 @@ def logout():
 def is_market_open_on_date(date_dt):
     date = date_dt.strftime('%Y-%m-%d')
     marketHour_rh = rh.markets.get_market_hours('XNYS', date)
+    if not marketHour_rh:
+        return False 
     return marketHour_rh['is_open']
 
 def is_market_open_now():
@@ -139,3 +142,21 @@ def send_email_notification(to_address, subject, body, attachment_path=None):
         print_with_time('Email sent successfully', file="log.txt")
     except Exception as e:
         print_with_time(f'Failed to send email: {e}', file="log.txt")
+
+def tracked_sleep(seconds):
+    start = time.time()
+    while time.time() - start < seconds:
+        print(f"{int(time.time() - start)} seconds elapsed", end="\r", flush=True)
+        time.sleep(min(1, seconds - (time.time() - start)))
+        
+
+def precise_sleep(sleep_time):
+    """
+    Sleeps for the specified amount of time with higher precision.
+    
+    Args:
+        sleep_time (float): The time to sleep, in seconds.
+    """
+    start_time = time.perf_counter()
+    while time.perf_counter() - start_time < sleep_time:
+        pass  # Busy wait for the duration
