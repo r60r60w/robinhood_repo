@@ -4,6 +4,7 @@ import config
 import logging
 import yagmail
 import time
+from tqdm import tqdm
 
 # Configure logging settings for console output
 logging.basicConfig(
@@ -160,3 +161,9 @@ def precise_sleep(sleep_time):
     start_time = time.perf_counter()
     while time.perf_counter() - start_time < sleep_time:
         pass  # Busy wait for the duration
+
+
+def custom_sleep_with_progress(seconds):
+    print(f"Sleeping for {seconds} seconds...")
+    for _ in tqdm(range(seconds), desc="Sleeping", unit="s", ncols=80):
+        time.sleep(1)
