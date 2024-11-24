@@ -128,6 +128,9 @@ class OptionTrader():
         while True:
             logger.info('******** New iteration started ********')
             logger.info(f'Important parameters: mode = {self.mode}, delta = {delta}, risk level = {risk_level}.')
+            logger.info(f'All current option positions:')
+            self.positions.df.reset_index(drop=True, inplace=True)
+            print(self.positions.df)
             self.place_short_calls_logic()      
             self.manage_short_calls_logic()
             minutes = 5
@@ -143,7 +146,7 @@ class OptionTrader():
     def place_short_calls_logic(self):
         """Place short calls as allowed by current position.
         """  
-        logger.info('\n**** Entering short call placing logic ****')
+        logger.info('**** Entering short call placing logic ****')
         shortCallOrder_rh_list = []
         todayDate_dt = dt.datetime.today().date()
         exp_dt = get_2nd_next_friday()
@@ -195,7 +198,7 @@ class OptionTrader():
         # Manage opened covered call positions
         # Gather all covered calls in positions
         # Run loop until no covered calls left in position.
-        logger.info('\n**** Entering short call managing logic ****')
+        logger.info('**** Entering short call managing logic ****')
         logger.info('Gathering all covered calls in current positions...')
         shortCalls = []
         self.positions.update() 
@@ -203,9 +206,14 @@ class OptionTrader():
             if position.type == 'call' and position.get_position_type_str() == 'short' and position not in shortCalls:
                 shortCalls.append(position)
         
-        shortCalls_df = self.positions.df.loc[self.positions.df['side'] == 'short']
+        shortCalls_df = self.positions.df.loc[self.positions.df['side'] == 'short'].copy()
         shortCalls_df.reset_index(drop=True, inplace=True)
-        
+        shortCalls_df.rename(columns={'cost': 'premium earned'}, inplace=True)
+        shortCalls_df.rename(columns={'current value': 'residual value'}, inplace=True)
+        shortCalls_df['premium earned'] = shortCalls_df['premium earned'] * -1
+        shortCalls_df['current price'] = shortCalls_df['current price'] * -1
+        shortCalls_df['residual value'] = shortCalls_df['residual value'] * -1
+        shortCalls_df['cum. cost'] = shortCalls_df['cum. cost'] * -1
         print(shortCalls_df)
         
         if is_market_open_now() or self.mode == 'test':
@@ -347,23 +355,23 @@ class OptionTrader():
             if dte <= 1 and strike < 0.95*stockPrice:
                 logger.info(f'[Action] Rolling this call to prevent assignment since call deep ITM and dte = {dte}.')
                 option_to_roll = option.find_option_to_rollup_with_credit(dte_delta=7, risk_level=self.risk_level)
-                status = None if option_to_roll == None else self.roll_option_ioc(option, option_to_roll, 'short', quantity, mode=self.mode)
+                status = None if option_to_roll == None else self.roll_option_ioc(option, option_to_roll, 'short', quantity)
             elif dte == 0 and strike >= 0.95*stockPrice:
                 logger.info(f'[Action] Rolling this call to prevent assignment since call ITM and it expires today.')
                 option_to_roll = option.find_option_to_rollup_with_credit(dte_delta=7, risk_level=self.risk_level)
-                status = None if option_to_roll == None else self.roll_option_ioc(option, option_to_roll, 'short', quantity, mode=self.mode)
+                status = None if option_to_roll == None else self.roll_option_ioc(option, option_to_roll, 'short', quantity)
             else:
                 logger.info(f'[Action] Too early for action. Do nothing.\n')
         else :
-            if return_rate > 0.95 or abs(price) <= 0.011 or self.mode == 'test':
+            if return_rate > 0.95 or abs(price) <= 0.015 or self.mode == 'test':
                 logger.info(f'[Action] Rolling this call to start a new cc cycle since call gained >95% return. ')
                 option_to_roll = option.find_option_to_roll_by_delta(dte_delta=7, risk_level=self.risk_level, delta=self.delta)
-                status = None if option_to_roll == None else self.roll_option_ioc(option, option_to_roll, 'short', quantity, mode=self.mode)
+                status = None if option_to_roll == None else self.roll_option_ioc(option, option_to_roll, 'short', quantity)
             else:
                 logger.info(f'[Action] Too early for action. Do nothing.\n')
         return status
 
-    def roll_option_ioc(self, old_option, new_option, position_type, quantity=1, mode='normal'):
+    def roll_option_ioc(self, old_option, new_option, position_type, quantity=1):
         """Place an order to roll the underlying option to a new option .
         The order will be canceled if not filled in 2 minuntes.
         :param new_option: The option to roll to
@@ -425,12 +433,14 @@ class OptionTrader():
                 "action": action2,
                 "ratio_quantity": 1}
 
+        adjusted_price = round(abs(price)-0.01,2)  # Lower price by 1 cent to increase chances of fill.
         logger.info(f'[{old_option.symbol}] Attempt to place an order to roll:')
         logger.info(f'[{old_option.symbol}] from exp: {old_option.exp}, strike: {old_option.strike}')
         logger.info(f'[{old_option.symbol}] to   exp: {new_option.exp}, strike: {new_option.strike}')
-        logger.info(f'[{old_option.symbol}] with credit: ${round(-1*price*100,2)}.')
+        logger.info(f'[{old_option.symbol}] quantity: {quantity}')
+        logger.info(f'[{old_option.symbol}] with credit: ${round(adjusted_price*100,2)}*{quantity}=${round(adjusted_price*100,2)*quantity}.')
         spread = [leg1,leg2]
-        order_rh = rh.orders.order_option_spread(debitOrCredit, round(abs(price),2), new_option.symbol, quantity, spread, jsonify=False)
+        order_rh = rh.orders.order_option_spread(debitOrCredit, adjusted_price, new_option.symbol, quantity, spread, jsonify=False)
         if order_rh.status_code >= 300 or order_rh.status_code < 200:
             logger.info(f'[{old_option.symbol}] Failed to place order with status code {order_rh.status_code}.')
             #logger.info(f'[{self.symbol}] Reason: {order_rh.json()['detail']}')
@@ -441,15 +451,21 @@ class OptionTrader():
             body = f"Succesfully placed roll order for {old_option.symbol}:\n \
                 from exp: {old_option.exp}, strike: {old_option.strike} \n\
                 to   exp: {new_option.exp}, strike: {new_option.strike} \n \
-                with credit: ${round(-1*price*100,2)}"
+                with credit: ${round(adjusted_price*100,2)}*{quantity}=${round(adjusted_price*100,2)*quantity}"
             send_email_notification(to_address=self.address, subject=f"[{old_option.symbol}] Roll Order Placed", body= body)
             
         # Cancel order after waiting for 2 min 
-        time.sleep(120) if mode != 'test' else time.sleep(0)
+        minutes = 2
+        logger.info(f'[{old_option.symbol}] Wait for {minutes} min for the order to be filled.')
+        custom_sleep_with_progress(minutes*60) if self.mode != 'test' else time.sleep(0)
         pendingOrders = rh.orders.get_all_open_option_orders()
         for pendingOrder in pendingOrders:
             if order_rh.json()['id'] == pendingOrder['id']:
                 rh.orders.cancel_option_order(pendingOrder['id'])
                 logger.info(f"[{old_option.symbol}] Order cancelled since it is not filled after 2 min.")
                 order_rh = None
+        
+        if order_rh:
+            logger.info(f'[{old_option.symbol}] Order filled!')
+            
         return order_rh

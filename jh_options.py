@@ -3,6 +3,7 @@ import time
 import robin_stocks.robinhood as rh
 import pandas as pd
 import math
+import matplotlib.pyplot as plt
 from jh_utilities import *
 #logger = get_logger(__name__)
 logger = get_logger(__name__, log_to_file=False, file_name="my_log_file.log")
@@ -24,11 +25,12 @@ class Option():
         self._delta = 0
         self._theta = 0
         self.id = 0 # To be updated by the below method
-        self.update()
+        self.valid = self.update()
 
     def get_option_rh(self): 
         options_rh = rh.options.find_options_by_expiration_and_strike(self.symbol, self.exp, self.strike, self.type)
         if not options_rh:
+            logger.debug("Returned None type. No option found.")
             raise EmptyListError()
 
         return options_rh
@@ -42,9 +44,22 @@ class Option():
             body = f"No option found: {e} for {self.symbol}, {self.exp}, {self.strike}."
             logger.error(body)
             send_email_notification(to_address=self.address, subject=f"Error Received", body=body)
-            return
+            return False
         else:
             option_rh = options_rh[0]
+
+        def keys_exist(dictionary, keys):
+            return all(key in dictionary for key in keys)
+
+        keys_to_check = ['ask_price', 'bid_price', 'adjusted_mark_price', 'delta', 'theta', 'volume', 'open_interest', 'id']
+
+        if keys_exist(option_rh, keys_to_check):
+            pass
+        else:
+            logger.error(f"KeyError: {option_rh}")
+            body = f"KeyError: {option_rh}"
+            send_email_notification(to_address=self.address, subject=f"Error Received", body=body)
+            return False
 
         self._ask_price = round(float(option_rh['ask_price']), 2)
         self._bid_price = round(float(option_rh['bid_price']), 2)
@@ -54,6 +69,7 @@ class Option():
         self._volume = option_rh['volume']
         self._OI = option_rh['open_interest']
         self.id = option_rh['id']
+        return True
 
     def print(self):
         self.update()
@@ -165,12 +181,22 @@ class Option():
                 new_exp_dt = self.get_exp_dt() + dt.timedelta(days=dte_delta)
                 new_exp = new_exp_dt.strftime('%Y-%m-%d')
         
-        if len(matchingOptions) == 0:
+        if not matchingOptions:
             logger.info(f'[{self.symbol}] No mathcing option found for rolling matching the delta range.')
             return None        
         
+        # Filter options with positive credit
+        matchingOptionsWithCredit = []
+        for option in matchingOptions:
+            if option.get_mark_price()-self.get_mark_price() > 0:
+                    matchingOptionsWithCredit.append(option)
+        
+        if not matchingOptionsWithCredit:
+            logger.info(f'[{self.symbol}] No mathcing option found for rolling that yields positive credit.')
+            return None        
+        
         # Print potential options
-        matchingOptions_df = create_dataframe_from_option_list(matchingOptions)
+        matchingOptions_df = create_dataframe_from_option_list(matchingOptionsWithCredit)
         
         # Add a column to show potential credit earned if rolled.
         for index, row in matchingOptions_df.iterrows():
@@ -181,13 +207,13 @@ class Option():
 
         # Select option based on risk level
         if risk_level == 'low':
-            selectedOption = matchingOptions[0]
+            selectedOption = matchingOptionsWithCredit[0]
         elif risk_level == 'medium':
-            mid_index = len(matchingOptions) // 2
-            selectedOption = matchingOptions[mid_index]
+            mid_index = len(matchingOptionsWithCredit) // 2
+            selectedOption = matchingOptionsWithCredit[mid_index]
         elif risk_level == 'high':
-            selectedOption = matchingOptions[-1]
-        logger.info(f'Selected option [{matchingOptions.index(selectedOption)}] to roll to.')
+            selectedOption = matchingOptionsWithCredit[-1]
+        logger.info(f'Selected option [{matchingOptionsWithCredit.index(selectedOption)}] to roll to.')
         return selectedOption
 
 
@@ -253,14 +279,9 @@ class Option():
 
 class OptionPosition():
     def __init__(self):
-        # option positions in a list of Option object
-        self.list = []
-        
-        # option positions in Dataframe format
-        self.df = pd.DataFrame(columns=[])
-        
+        self.list = [] # option positions in a list of Option object
+        self.df = pd.DataFrame(columns=[]) # option positions in Dataframe format
         self.all_orders_rh = []
-        
         # Update to latest
         self.update()
         
@@ -273,6 +294,9 @@ class OptionPosition():
         for position in optionPositions_rh:
             option_rh = rh.options.get_option_instrument_data_by_id(position['option_id'])
             option = Option(option_rh['chain_symbol'], option_rh['expiration_date'], float(option_rh['strike_price']), option_rh['type'])
+            if not option.valid:
+                logger.error(f'Option {option.symbol} is not valid. Skip this option.')
+                continue
             quantity = float(position['quantity'])
             if position['type'] == 'short':
                 option.quantity = -1*quantity
@@ -296,9 +320,9 @@ class OptionPosition():
                    'delta': option.get_delta(),
                    'theta': option.get_theta(),
                    'quantity': quantity,
-                   'price': round(current_price, 2),
-                   'total cost': round(option.cost, 2),
-                   'total value': round(current_price * 100 * quantity, 2),
+                   'current price': round(current_price, 2),
+                   'cost': round(option.cost, 2),
+                   'current value': round(current_price * 100 * quantity, 2),
                    'cum. cost': round(option.cum_cost, 2),
                    'cum. return': round(total_return, 2),
                    'return %': f'{round(return_percentage, 2)}%'
@@ -307,8 +331,8 @@ class OptionPosition():
             optionTable.append(row)
         
         self.df = pd.DataFrame(optionTable)
-        self.df.sort_values(by='total value', inplace=True, ascending=False)   
-        columns_to_sum = ['total value', 'cum. cost', 'cum. return']
+        self.df.sort_values(by='current value', inplace=True, ascending=False)   
+        columns_to_sum = ['cost', 'current value', 'cum. cost', 'cum. return']
         self.df.loc['sum', columns_to_sum] = self.df[columns_to_sum].sum()
 
     def get_all_positions(self):
@@ -327,7 +351,7 @@ class OptionPosition():
         side = 'sell' if option.get_position_type() == -1 else 'buy'
         cost = 0
 
-        [df_all, df_sc, df_lc] = self.tabulate_option_positions_by_symbol(symbol)
+        [_, df_sc, df_lc] = self.tabulate_option_positions_by_symbol(symbol)
         
         if side == 'sell':
             df = df_sc
@@ -338,7 +362,7 @@ class OptionPosition():
         df.reset_index(drop=True, inplace=True)
         
         cost = 0
-        for index, row in df.iterrows():
+        for _, row in df.iterrows():
             if row['effect'] == 'open' and exp == row['exp'] and strike == row['strike'] and type == row['type']:
                 cost_change = abs(row['price']) * row['quantity'] * 100
                 if side == 'sell': 
@@ -356,7 +380,7 @@ class OptionPosition():
         side = 'sell' if option.get_position_type() == -1 else 'buy'
         cost = 0
 
-        [df_all, df_sc, df_lc] = self.tabulate_option_positions_by_symbol(symbol)
+        [_, df_sc, df_lc] = self.tabulate_option_positions_by_symbol(symbol)
         
         if side == 'sell':
             df = df_sc
@@ -441,11 +465,11 @@ class OptionPosition():
         selected_columns = ['created_at', 'direction', 'legs', 'opening_strategy', 'closing_strategy', 'form_source', 'average_net_premium_paid', 'processed_premium', 'quantity']
         df_selected = df[selected_columns]
         expand_columns = ['time', 'strategy', 'effect', 'side', 'type', 'exp', 'strike', 'quantity', 'price', 'premium']
-        df_all = pd.DataFrame(columns=expand_columns)
+        rows = []
         for index, row in df_selected.iterrows():
             time = row['created_at'] 
             time_dt = dt.datetime.strptime(time, '%Y-%m-%dT%H:%M:%S.%fZ')
-            time_dt -= dt.timedelta(hours=7)
+            time_dt = time_dt - dt.timedelta(hours=7)
             time = time_dt.strftime('%Y-%m-%d %H:%M')
             quantity = float(row['quantity'])
             for legIndex, leg in enumerate(row['legs']):
@@ -467,7 +491,9 @@ class OptionPosition():
                 else:
                     strategy = effect + ': ' + short_or_long + ' ' + option_type
 
-                df_all.loc[len(df_all)] = [time, strategy, effect, side, option_type, exp, strike, quantity, option_price, premium]
+                rows.append([time, strategy, effect, side, option_type, exp, strike, quantity, option_price, premium])
+        
+        df_all = pd.DataFrame(rows, columns=expand_columns)
                 
         df_all['running_premium'] = df_all.iloc[::-1]['premium'].cumsum()[::-1]
         
@@ -494,12 +520,14 @@ class OptionPosition():
                         df_all.at[index, 'strategy'] = f'roll: {leg_type} {row["type"]} leg #0'
                         df_all.at[next_index, 'strategy'] = f'roll: {leg_type} {row["type"]} leg #1'
         
-        # Calculate the net premium of roll pairs. 
+        # Calculate the net premium of roll pairs.
         for index, row in df_all.iterrows():
-            if row['strategy'][:4] == 'roll' and row['strategy'][-2:] == '#0':
-                next_row = df_all.iloc[index+1]   
+            strategy_prefix = row['strategy'][:4]
+            strategy_suffix = row['strategy'][-2:]
+            if strategy_prefix == 'roll' and strategy_suffix == '#0':
+                next_row = df_all.iloc[index + 1]
                 df_all.at[index, 'premium'] += next_row['premium']
-                df_all.at[index+1, 'premium'] = 0
+                df_all.at[index + 1, 'premium'] = 0
 
         # Filter short calls (covered calls)
         mask = df_all['strategy'].str.contains('short call')
@@ -512,6 +540,128 @@ class OptionPosition():
         df_lc['running_premium']=df_lc.iloc[::-1]['premium'].cumsum()[::-1]
         
         return df_all, df_sc, df_lc
+    
+    def tabulate_short_call_PnL_by_symbol(self, symbol):
+        """Tabulate PnL of short call positions by symbol
+
+            Args:
+                symbol (_type_): string
+
+            Returns:
+                _type_: Pandas dataframe
+                        returns a dataframe with PnL of short call positions
+            """
+        [_, df_sc, _] = self.tabulate_option_positions_by_symbol(symbol)
+        df = df_sc
+        df.reset_index(drop=True, inplace=True)
+        # Remove rows whose strategy column ends with "#1"
+        df = df[~df['strategy'].str.endswith('#1')]
+        columns_to_keep = ['time', 'premium', 'running_premium']
+        df = df[columns_to_keep]
+        return df
+    
+    
+    def plot_short_call_PnL_by_symbol(self, symbol, week_range):
+        df = self.tabulate_short_call_PnL_by_symbol(symbol)
+        end_date = dt.datetime.now()
+        start_date = end_date - dt.timedelta(weeks=week_range)
+        df['time'] = pd.to_datetime(df['time'])
+        df_filtered = df[(df['time'] >= start_date) & (df['time'] <= end_date)]
+        
+        df_filtered = df_filtered.sort_values(by='time', ascending=True)
+        
+        fig, ax = plt.subplots(2, 1, figsize=(10, 10), sharex=True)
+        
+        ax[0].plot(df_filtered['time'], df_filtered['running_premium'], marker='o', linestyle='-', color='b')
+        ax[0].set_ylabel('Running Premium')
+        ax[0].set_title(f'Short Call Running Premium for {symbol} (Last {week_range} weeks)')
+        ax[0].grid(True)
+        
+        ax[1].plot(df_filtered['time'], df_filtered['premium'], marker='o', linestyle='-', color='r')
+        ax[1].set_xlabel('Time')
+        ax[1].set_ylabel('Premium')
+        ax[1].set_title(f'Short Call Premium for {symbol} (Last {week_range} weeks)')
+        ax[1].grid(True)
+        
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.show()
+        
+    def plot_short_call_PnL_for_multiple_symbols(self, symbol_list, week_range):
+        """Plot the premium for multiple symbols overlaying the results in one plot.
+
+        Args:
+            symbols (list): List of stock symbols.
+            week_range (int): Number of weeks to look back for the plot.
+        """
+        end_date = dt.datetime.now()
+        start_date = end_date - dt.timedelta(weeks=week_range)
+        
+        plt.figure(figsize=(12, 8))
+        
+        for symbol in symbol_list:
+            df = self.tabulate_short_call_PnL_by_symbol(symbol)
+            df['time'] = pd.to_datetime(df['time'])
+            df_filtered = df[(df['time'] >= start_date) & (df['time'] <= end_date)]
+            df_filtered = df_filtered.sort_values(by='time', ascending=True)
+            
+            plt.plot(df_filtered['time'], df_filtered['premium'], marker='o', linestyle='-', label=symbol)
+        
+        plt.xlabel('Time')
+        plt.ylabel('Premium')
+        plt.title(f'Short Call Premium for Multiple Symbols (Last {week_range} weeks)')
+        plt.legend()
+        plt.grid(True)
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.show()
+
+    def plot_covered_call_vs_stock(self, symbol, week_range):
+        _, df_sc, _ = self.tabulate_option_positions_by_symbol(symbol)
+        df_sc = df_sc[df_sc['effect']!='close']
+        df_sc['time'] = pd.to_datetime(df_sc['time'])
+        
+        end_date = dt.datetime.now()
+        start_date = end_date - dt.timedelta(weeks=week_range)
+        
+        df_filtered = df_sc[(df_sc['time'] >= start_date) & (df_sc['time'] <= end_date)]
+        
+        stock_prices = rh.stocks.get_stock_historicals(symbol, interval='hour', span=f'3month')
+        stock_prices_df = pd.DataFrame(stock_prices)
+        stock_prices_df['begins_at'] = pd.to_datetime(stock_prices_df['begins_at']) - pd.Timedelta(hours=7)
+        stock_prices_df['begins_at'] = stock_prices_df['begins_at'].dt.strftime('%Y-%m-%d %H:%M')
+        stock_prices_df['close_price'] = stock_prices_df['close_price'].astype(float)
+        stock_prices_df['begins_at'] = pd.to_datetime(stock_prices_df['begins_at'])
+        stock_prices_df = stock_prices_df[(stock_prices_df['begins_at'] >= start_date) & (stock_prices_df['begins_at'] <= end_date)]
+        
+        fig, ax = plt.subplots(figsize=(12, 8))
+        
+        ax.plot(stock_prices_df['begins_at'], stock_prices_df['close_price'], label='Stock Price', color='blue')
+        
+        for index, row in df_filtered.iterrows():
+            open_time = row['time']
+            strike_price = row['strike']
+            exp_time = dt.datetime.strptime(row['exp'], '%Y-%m-%d')
+            
+            # Find stock price when the option was opened.
+            if stock_prices_df[stock_prices_df['begins_at'] == open_time].empty:
+                nearest_time = stock_prices_df.iloc[(stock_prices_df['begins_at'] - open_time).abs().argsort()[:1]]['begins_at'].values[0]
+                stock_price_at_open = stock_prices_df[stock_prices_df['begins_at'] == nearest_time]['close_price'].values[0]
+            else:
+                stock_price_at_open = stock_prices_df[stock_prices_df['begins_at'] == open_time]['close_price'].values[0]
+            
+            ax.plot([open_time, exp_time], [stock_price_at_open, strike_price], color='green', linestyle='--', marker='o')
+            ax.fill_betweenx([stock_price_at_open, strike_price], open_time, exp_time, color='green', alpha=0.3)
+        
+        ax.set_xlabel('Time')
+        ax.set_ylabel('Price')
+        ax.set_title(f'Covered Call Overlay vs Stock Price for {symbol} (Last {week_range} weeks)')
+        ax.legend()
+        ax.grid(True)
+        
+        plt.xticks(rotation=45)
+        plt.tight_layout()
+        plt.show()
 
     def get_covered_call_limit(self, symbol):
         """Calculate the maximal amount of covered calls that can be written based on current positions

@@ -10,6 +10,9 @@ import yfinance as yf
 import yagmail
 
 import pandas as pd
+
+login(1)
+positions = OptionPosition()
 #%%
 symbol = 'TSLA'
 stock = yf.Ticker(symbol)
