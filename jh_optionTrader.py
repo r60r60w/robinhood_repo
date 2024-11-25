@@ -92,9 +92,15 @@ class StockAlgorithmThread(threading.Thread):
 '''
 
 class OptionTrader():
-    def __init__(self, symbol_list, mode, risk_level='low', delta=0.2, MAX_ATTEMPT=5, address='r60r60w@gmail.com') -> None:
+    def __init__(self, symbol_list=[], mode='test', risk_level='low', delta=0.2, MAX_ATTEMPT=5, address='r60r60w@gmail.com') -> None:
         self.positions = OptionPosition()
-        self.symbol_list = symbol_list
+        
+        if len(symbol_list) == 0:
+            logger.info('No stock symbol is provided. Looking for all available symbols for covered call.')
+            self.symbol_list = self.positions.get_all_symbols_for_cc()
+            logger.info(f'All available stocks for covered call: {self.symbol_list}')
+        else:
+            self.symbol_list = symbol_list    
         self.mode = mode
         self.risk_level = risk_level
         self.delta = delta

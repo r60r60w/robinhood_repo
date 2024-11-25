@@ -4,6 +4,7 @@ import robin_stocks.robinhood as rh
 import pandas as pd
 import math
 import matplotlib.pyplot as plt
+import yfinance as yf
 from jh_utilities import *
 #logger = get_logger(__name__)
 logger = get_logger(__name__, log_to_file=False, file_name="my_log_file.log")
@@ -469,7 +470,6 @@ class OptionPosition():
         for index, row in df_selected.iterrows():
             time = row['created_at'] 
             time_dt = dt.datetime.strptime(time, '%Y-%m-%dT%H:%M:%S.%fZ')
-            time_dt = time_dt - dt.timedelta(hours=7)
             time = time_dt.strftime('%Y-%m-%d %H:%M')
             quantity = float(row['quantity'])
             for legIndex, leg in enumerate(row['legs']):
@@ -626,18 +626,45 @@ class OptionPosition():
         
         df_filtered = df_sc[(df_sc['time'] >= start_date) & (df_sc['time'] <= end_date)]
         
-        stock_prices = rh.stocks.get_stock_historicals(symbol, interval='hour', span=f'3month')
-        stock_prices_df = pd.DataFrame(stock_prices)
-        stock_prices_df['begins_at'] = pd.to_datetime(stock_prices_df['begins_at']) - pd.Timedelta(hours=7)
+        if week_range <=1:
+            interval = '2m'
+            period = '1mo'
+        elif week_range <=2:
+            interval = '5m'
+            period = '1mo'
+        elif week_range <=4:
+            interval = '15m'
+            period = '1mo'
+        elif week_range <=12:
+            interval = '1h'
+            period = '3mo'  
+        else:
+            logger.info('The range is too long. Please select a range no greater than 12 weeks.')
+            return False
+        
+        # stock_prices = rh.stocks.get_stock_historicals(symbol, interval='10minute', span=f'3month')
+        # stock_prices_df = pd.DataFrame(stock_prices)
+        # stock_prices_df['begins_at'] = pd.to_datetime(stock_prices_df['begins_at'])
+        # stock_prices_df['begins_at'] = stock_prices_df['begins_at'].dt.strftime('%Y-%m-%d %H:%M')
+        # stock_prices_df['close_price'] = stock_prices_df['close_price'].astype(float)
+        # stock_prices_df['begins_at'] = pd.to_datetime(stock_prices_df['begins_at'])
+        # stock_prices_df = stock_prices_df[(stock_prices_df['begins_at'] >= start_date) & (stock_prices_df['begins_at'] <= end_date)]
+
+        ticjker = yf.Ticker(symbol)
+        stock_data = ticjker.history(period=period, interval=interval)
+        stock_prices_df = stock_data.reset_index()
+        stock_prices_df.rename(columns={'Datetime': 'begins_at', 'Close': 'close_price'}, inplace=True)
         stock_prices_df['begins_at'] = stock_prices_df['begins_at'].dt.strftime('%Y-%m-%d %H:%M')
-        stock_prices_df['close_price'] = stock_prices_df['close_price'].astype(float)
         stock_prices_df['begins_at'] = pd.to_datetime(stock_prices_df['begins_at'])
         stock_prices_df = stock_prices_df[(stock_prices_df['begins_at'] >= start_date) & (stock_prices_df['begins_at'] <= end_date)]
+        stock_prices_df = stock_prices_df.reset_index()
         
         fig, ax = plt.subplots(figsize=(12, 8))
         
-        ax.plot(stock_prices_df['begins_at'], stock_prices_df['close_price'], label='Stock Price', color='blue')
-        
+        ax.plot(range(len(stock_prices_df['begins_at'])), stock_prices_df['close_price'], label='Stock Price', color='blue')
+        ax.set_xticks([i for i in range(len(stock_prices_df['begins_at'])) if stock_prices_df['begins_at'].iloc[i].hour == 9 and stock_prices_df['begins_at'].iloc[i].minute == 30])  # Assuming market opens at 9:30 AM
+        ax.set_xticklabels(stock_prices_df['begins_at'].dt.strftime('%Y-%m-%d %H:%M')[ax.get_xticks()], rotation=45, ha='right')
+
         for index, row in df_filtered.iterrows():
             open_time = row['time']
             strike_price = row['strike']
@@ -647,12 +674,28 @@ class OptionPosition():
             if stock_prices_df[stock_prices_df['begins_at'] == open_time].empty:
                 nearest_time = stock_prices_df.iloc[(stock_prices_df['begins_at'] - open_time).abs().argsort()[:1]]['begins_at'].values[0]
                 stock_price_at_open = stock_prices_df[stock_prices_df['begins_at'] == nearest_time]['close_price'].values[0]
+                open_index = stock_prices_df[stock_prices_df['begins_at'] == nearest_time].index[0]
             else:
                 stock_price_at_open = stock_prices_df[stock_prices_df['begins_at'] == open_time]['close_price'].values[0]
+                open_index = stock_prices_df[stock_prices_df['begins_at'] == open_time].index[0]
+                
+            # Find stock price when the option expires.
+            if stock_prices_df[stock_prices_df['begins_at'] == exp_time].empty:
+                nearest_time = stock_prices_df.iloc[(stock_prices_df['begins_at'] - exp_time).abs().argsort()[:1]]['begins_at'].values[0]
+                stock_price_at_exp = stock_prices_df[stock_prices_df['begins_at'] == nearest_time]['close_price'].values[0]
+                exp_index = stock_prices_df[stock_prices_df['begins_at'] == nearest_time].index[0]
+            else:
+                stock_price_at_exp = stock_prices_df[stock_prices_df['begins_at'] == exp_time]['close_price'].values[0]
+                exp_index = stock_prices_df[stock_prices_df['begins_at'] == exp_time].index[0]
+                
+            if stock_price_at_exp > strike_price:
+                color = 'red'
+            else:
+                color = 'green'
+                
+            ax.plot([open_index, exp_index], [stock_price_at_open, strike_price], color=color, linestyle='--', marker='o')
+            ax.fill_betweenx([stock_price_at_open, strike_price], open_index, exp_index, color=color, alpha=0.3)
             
-            ax.plot([open_time, exp_time], [stock_price_at_open, strike_price], color='green', linestyle='--', marker='o')
-            ax.fill_betweenx([stock_price_at_open, strike_price], open_time, exp_time, color='green', alpha=0.3)
-        
         ax.set_xlabel('Time')
         ax.set_ylabel('Price')
         ax.set_title(f'Covered Call Overlay vs Stock Price for {symbol} (Last {week_range} weeks)')
@@ -662,6 +705,7 @@ class OptionPosition():
         plt.xticks(rotation=45)
         plt.tight_layout()
         plt.show()
+        return True
 
     def get_covered_call_limit(self, symbol):
         """Calculate the maximal amount of covered calls that can be written based on current positions
@@ -684,7 +728,7 @@ class OptionPosition():
 
         #TODO: Make the below code a method in optionPosition
         # Check if there is enough underlying stocks to cover the short call
-        logger.debug('Check how many stocks in units of 100 to cover the short call...')
+        logger.debug('Check how many stocks in units of 100 shares to cover the short call...')
         stock_positions = rh.account.get_open_stock_positions()
         stock_lots = 0
         for position in stock_positions:
@@ -699,7 +743,28 @@ class OptionPosition():
         cc_limit = long_call_num + stock_lots - short_call_num
         logger.debug(f'Covered call limit is: {cc_limit} for {symbol}.')
         return cc_limit
-
+    
+    def get_all_symbols_for_cc(self):
+        symbols = []
+        
+        # Gather symbols that have greater than 100 shares of stocks
+        stock_positions = rh.account.get_open_stock_positions()
+        for position in stock_positions:
+            stock_info = rh.stocks.get_stock_quote_by_id(position['instrument_id'])
+            symbol = stock_info['symbol']
+            position_shares = float(position['quantity'])
+            if position_shares >= 100:
+                if symbol not in symbols:
+                    symbols.append(symbol)
+        
+        # Gather symbols that have long call positions
+        for position in self.list:
+            symbol = position.symbol
+            if position.type == 'call' and position.get_position_type_str() == 'long':
+                if symbol not in symbols:
+                    symbols.append(symbol) 
+        
+        return symbols
 
 def find_options_by_delta(symbol, exp, type, delta_min, delta_max):
     """

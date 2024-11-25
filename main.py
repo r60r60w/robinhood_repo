@@ -12,7 +12,8 @@ logger = get_logger(__name__)
 def main():
     login(days=1)
     mode = 'normal'
-    trader = OptionTrader(['GOOGL','TSM','INTC','AMD','NVDA'], mode)
+    symbol_list=['GOOGL','TSM','INTC','AMD','NVDA'
+    trader = OptionTrader(symbol_list=[], mode=mode)
     trader.run_cc(risk_level='medium', delta=0.25, MAX_ATTEMPT=3)
 
 
