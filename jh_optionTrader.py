@@ -114,7 +114,7 @@ class OptionTrader():
         orders_rh = rh.orders.get_all_open_option_orders()
         print(orders_rh)
         
-    def run_cc(self, risk_level='low', delta=0.2, MAX_ATTEMPT=5):
+    def run_cc(self, risk_level='low', delta=0.2, MAX_ATTEMPT=5, only_manage_existing=False):
         # Opening covered call position
         # Determine if today is Monday
         logger.info('******** Running covered call strategy ********')
@@ -136,8 +136,9 @@ class OptionTrader():
             logger.info(f'Important parameters: mode = {self.mode}, delta = {delta}, risk level = {risk_level}.')
             logger.info(f'All current option positions:')
             self.positions.df.reset_index(drop=True, inplace=True)
-            print(self.positions.df)
-            self.place_short_calls_logic()      
+            self.positions.print_all_positions()
+            if not only_manage_existing:
+                self.place_short_calls_logic()      
             self.manage_short_calls_logic()
             minutes = 5
             logger.info(f'Wait for {minutes} min before starting new iteration.')

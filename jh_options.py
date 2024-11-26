@@ -294,6 +294,9 @@ class OptionPosition():
         optionTable = []
         for position in optionPositions_rh:
             option_rh = rh.options.get_option_instrument_data_by_id(position['option_id'])
+            if option_rh is None:
+                logger.error(f'Option {position["option_id"]} is not found. Skip this option.')
+                continue
             option = Option(option_rh['chain_symbol'], option_rh['expiration_date'], float(option_rh['strike_price']), option_rh['type'])
             if not option.valid:
                 logger.error(f'Option {option.symbol} is not valid. Skip this option.')
@@ -340,8 +343,6 @@ class OptionPosition():
         return self.list
     
     def print_all_positions(self):
-        # Print header
-        print_with_time('---- Current Option Positions ----')
         print(self.df)
      
     def calculate_option_cost(self, option):  
@@ -542,15 +543,17 @@ class OptionPosition():
         return df_all, df_sc, df_lc
     
     def tabulate_short_call_PnL_by_symbol(self, symbol):
-        """Tabulate PnL of short call positions by symbol
-
-            Args:
-                symbol (_type_): string
-
-            Returns:
-                _type_: Pandas dataframe
-                        returns a dataframe with PnL of short call positions
-            """
+        """
+        Tabulate PnL (Profit and Loss) of short call positions by symbol.
+        Args:
+            symbol (str): The symbol for which to tabulate the PnL.
+        Returns:
+            pandas.DataFrame: A dataframe containing the PnL of short call positions.
+                            The dataframe includes the following columns:
+                            - 'time': The time of the position.
+                            - 'premium': The premium of the position.
+                            - 'running_premium': The running premium of the position.
+        """
         [_, df_sc, _] = self.tabulate_option_positions_by_symbol(symbol)
         df = df_sc
         df.reset_index(drop=True, inplace=True)
@@ -562,6 +565,14 @@ class OptionPosition():
     
     
     def plot_short_call_PnL_by_symbol(self, symbol, week_range):
+        """
+        Plots the Profit and Loss (PnL) for short call options by symbol over a specified range of weeks.
+        Args:
+            symbol (str): The stock symbol for which to plot the short call PnL.
+            week_range (int): The number of weeks to include in the plot.
+        Returns:
+            None: This function displays a plot and does not return any value.
+        """
         df = self.tabulate_short_call_PnL_by_symbol(symbol)
         end_date = dt.datetime.now()
         start_date = end_date - dt.timedelta(weeks=week_range)
@@ -617,6 +628,15 @@ class OptionPosition():
         plt.show()
 
     def plot_covered_call_vs_stock(self, symbol, week_range):
+        """
+        Plot the stock price and the covered call premium for a given symbol over a given range of weeks.
+        This function retrieves historical stock prices and covered call option data for a specified symbol and plots the stock price along with the covered call premium over a specified range of weeks. The plot includes markers and lines indicating the opening and expiration of covered call options, with color coding to show whether the stock price at expiration was above or below the strike price.
+        Args:
+            symbol (str): The stock symbol to retrieve data for.
+            week_range (int): The range of weeks to plot data for. Must be no greater than 12 weeks.
+        Returns:
+            bool: True if the plot was successfully generated, False otherwise.
+        """
         _, df_sc, _ = self.tabulate_option_positions_by_symbol(symbol)
         df_sc = df_sc[df_sc['effect']!='close']
         df_sc['time'] = pd.to_datetime(df_sc['time'])
@@ -650,13 +670,14 @@ class OptionPosition():
         # stock_prices_df['begins_at'] = pd.to_datetime(stock_prices_df['begins_at'])
         # stock_prices_df = stock_prices_df[(stock_prices_df['begins_at'] >= start_date) & (stock_prices_df['begins_at'] <= end_date)]
 
-        ticjker = yf.Ticker(symbol)
-        stock_data = ticjker.history(period=period, interval=interval)
+        ticker = yf.Ticker(symbol)
+        stock_data = ticker.history(period=period, interval=interval)
         stock_prices_df = stock_data.reset_index()
         stock_prices_df.rename(columns={'Datetime': 'begins_at', 'Close': 'close_price'}, inplace=True)
         stock_prices_df['begins_at'] = stock_prices_df['begins_at'].dt.strftime('%Y-%m-%d %H:%M')
         stock_prices_df['begins_at'] = pd.to_datetime(stock_prices_df['begins_at'])
-        stock_prices_df = stock_prices_df[(stock_prices_df['begins_at'] >= start_date) & (stock_prices_df['begins_at'] <= end_date)]
+        stock_prices_df['date'] = stock_prices_df['begins_at'].dt.date
+        stock_prices_df = stock_prices_df[(stock_prices_df['date'] >= start_date.date()) & (stock_prices_df['date'] <= end_date.date())]
         stock_prices_df = stock_prices_df.reset_index()
         
         fig, ax = plt.subplots(figsize=(12, 8))
