@@ -397,6 +397,9 @@ class OptionPosition():
             if row['effect'] == 'open' and exp == row['exp'] and strike == row['strike'] and type == row['type']:
                 if row['strategy'].startswith('open'):
                     cost += -1 * row['premium'] * (quantity/row['quantity'])
+                    quantity -= row['quantity']
+                    if quantity <= 0:
+                        quantity = 0
                 elif row['strategy'].startswith('roll'):
                     if row['strategy'].endswith('#0'):
                         cost += -1 * row['premium'] * (quantity/row['quantity'])
