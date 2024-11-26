@@ -44,7 +44,7 @@ class Option():
         except EmptyListError as e:
             body = f"No option found: {e} for {self.symbol}, {self.exp}, {self.strike}."
             logger.error(body)
-            send_email_notification(to_address=self.address, subject=f"Error Received", body=body)
+            send_email_notification(subject=f"Error Received", body=body)
             return False
         else:
             option_rh = options_rh[0]
@@ -59,7 +59,7 @@ class Option():
         else:
             logger.error(f"KeyError: {option_rh}")
             body = f"KeyError: {option_rh}"
-            send_email_notification(to_address=self.address, subject=f"Error Received", body=body)
+            send_email_notification(subject=f"Error Received", body=body)
             return False
 
         self._ask_price = round(float(option_rh['ask_price']), 2)
@@ -379,6 +379,7 @@ class OptionPosition():
         exp = option.exp
         strike = option.strike
         type = option.type
+        quantity = abs(option.quantity)
         side = 'sell' if option.get_position_type() == -1 else 'buy'
         cost = 0
 
@@ -395,14 +396,14 @@ class OptionPosition():
         for index, row in df.iterrows():
             if row['effect'] == 'open' and exp == row['exp'] and strike == row['strike'] and type == row['type']:
                 if row['strategy'].startswith('open'):
-                    cost += -1 * row['premium']
+                    cost += -1 * row['premium'] * (quantity/row['quantity'])
                 elif row['strategy'].startswith('roll'):
                     if row['strategy'].endswith('#0'):
-                        cost += -1 * row['premium']
+                        cost += -1 * row['premium'] * (quantity/row['quantity'])
                         exp = df.iloc[index+1]['exp']
                         strike = df.iloc[index+1]['strike']
                     else:
-                        cost += -1 * df.iloc[index-1]['premium']
+                        cost += -1 * df.iloc[index-1]['premium'] * (quantity/row['quantity'])
                         exp = df.iloc[index-1]['exp']
                         strike = df.iloc[index-1]['strike']
                    
@@ -640,11 +641,12 @@ class OptionPosition():
         _, df_sc, _ = self.tabulate_option_positions_by_symbol(symbol)
         df_sc = df_sc[df_sc['effect']!='close']
         df_sc['time'] = pd.to_datetime(df_sc['time'])
+        df_sc['date'] = df_sc['time'].dt.date
         
         end_date = dt.datetime.now()
         start_date = end_date - dt.timedelta(weeks=week_range)
         
-        df_filtered = df_sc[(df_sc['time'] >= start_date) & (df_sc['time'] <= end_date)]
+        df_filtered = df_sc[(df_sc['date'] >= start_date.date()) & (df_sc['date'] <= end_date.date())]
         
         if week_range <=1:
             interval = '2m'

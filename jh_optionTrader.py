@@ -92,7 +92,7 @@ class StockAlgorithmThread(threading.Thread):
 '''
 
 class OptionTrader():
-    def __init__(self, symbol_list=[], mode='test', risk_level='low', delta=0.2, MAX_ATTEMPT=5, address='r60r60w@gmail.com') -> None:
+    def __init__(self, symbol_list=[], mode='test', risk_level='low', delta=0.2, MAX_ATTEMPT=5) -> None:
         self.positions = OptionPosition()
         
         if len(symbol_list) == 0:
@@ -105,7 +105,6 @@ class OptionTrader():
         self.risk_level = risk_level
         self.delta = delta
         self.MAX_ATTEMPT = MAX_ATTEMPT
-        self.address = address
 
     def print_all_positions(self):
         self.positions.print_all_positions()
@@ -322,7 +321,7 @@ class OptionTrader():
             logger.info('Sending email notification.')
             body = f"Succesfully placed STO for {symbol} with \
                 exp: {selectedOption.exp}, strike: {selectedOption.strike}, credit: ${round(limit_price*100, 2)}"
-            send_email_notification(to_address=self.address, subject=f"[{symbol}] STO Order Placed", body=body)
+            send_email_notification(subject=f"[{symbol}] STO Order Placed", body=body)
              
         return order_rh
 
@@ -335,7 +334,7 @@ class OptionTrader():
         if option == None:
             body = f'[{option.symbol}] The short option to close is not open in your account. Option not closed.'
             logger.critical(body)
-            send_email_notification(to_address=self.address, subject=f"Error Received", body=body)
+            send_email_notification(subject=f"Error Received", body=body)
             return None
             
         # Check if the short call is in open orders
@@ -459,7 +458,7 @@ class OptionTrader():
                 from exp: {old_option.exp}, strike: {old_option.strike} \n\
                 to   exp: {new_option.exp}, strike: {new_option.strike} \n \
                 with credit: ${round(adjusted_price*100,2)}*{quantity}=${round(adjusted_price*100,2)*quantity}"
-            send_email_notification(to_address=self.address, subject=f"[{old_option.symbol}] Roll Order Placed", body= body)
+            send_email_notification(subject=f"[{old_option.symbol}] Roll Order Placed", body= body)
             
         # Cancel order after waiting for 2 min 
         minutes = 2

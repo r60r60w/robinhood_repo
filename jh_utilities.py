@@ -4,7 +4,12 @@ import config
 import logging
 import yagmail
 import time
+import json
+
 from tqdm import tqdm
+
+with open('settings.json', 'r') as f:
+    settings = json.load(f)
 
 # Configure logging settings for console output
 logging.basicConfig(
@@ -126,7 +131,7 @@ def get_2nd_next_friday():
 
     return second_next_friday
 
-def send_email_notification(to_address, subject, body, attachment_path=None):
+def send_email_notification(subject, body, to_address=settings['email_address'], attachment_path=None):
     # Email settings
     email_address = 'r60r60w@gmail.com'
     app_password = 'sffl xnzq nekx jvio'
