@@ -4,6 +4,7 @@ from jh_utilities import *
 from jh_options import *
 from technical_indicator import *
 import yfinance as yf
+import random
 #import threading
 #logger = get_logger(__name__)
 logger = get_logger(__name__, log_to_file=False, file_name="my_log_file.log")
@@ -131,15 +132,20 @@ class OptionTrader():
         #     stock_threads[symbol].start()
         #try: 
         while True:
-            logger.info('******** New iteration started ********')
-            logger.info(f'Important parameters: mode = {self.mode}, delta = {delta}, risk level = {risk_level}.')
-            logger.info(f'All current option positions:')
-            self.positions.df.reset_index(drop=True, inplace=True)
-            self.positions.print_all_positions()
-            if not only_manage_existing:
-                self.place_short_calls_logic()      
-            self.manage_short_calls_logic()
-            minutes = 5
+            if is_market_open_now() or self.mode == 'test':
+                logger.info('******** New iteration started ********')
+                logger.info(f'Important parameters: mode = {self.mode}, delta = {delta}, risk level = {risk_level}.')
+                logger.info(f'All current option positions:')
+                self.positions.df.reset_index(drop=True, inplace=True)
+                self.positions.print_all_positions()
+                if not only_manage_existing:
+                    self.place_short_calls_logic()      
+                self.manage_short_calls_logic()
+            else:
+                logger.info('Market is closed now.')
+                
+                
+            minutes = random.randint(2, 9)
             logger.info(f'Wait for {minutes} min before starting new iteration.')
             custom_sleep_with_progress(minutes*60) if self.mode != 'test' else tracked_sleep(0)
                 

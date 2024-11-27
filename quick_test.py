@@ -13,7 +13,7 @@ import pandas as pd
 
 login(1)
 p = OptionPosition()
-
+p.calculate_option_cumulative_cost(p.list[1])
 
 #%%
 symbol = 'TSLA'
