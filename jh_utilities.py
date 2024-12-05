@@ -50,7 +50,7 @@ def login(days):
                             expiresIn=time_logged_in,
                             scope='internal',
                             by_sms=True,
-                            store_session=True)
+                            store_session=False)
     profile = rh.profiles.load_user_profile()
     logger.info(f'******** Successfully logged in to Robinhood account for {profile['first_name']} {profile['last_name']} ********')
 

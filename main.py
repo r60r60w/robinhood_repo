@@ -12,7 +12,7 @@ logger = get_logger(__name__)
  2. Reduce price carefully instead of hard code minus 1 cent
 '''
 def main():
-    login(days=3)
+    login(days=5)
     trader = OptionTrader(symbol_list=settings['symbol_list'], mode=settings['mode'])
     trader.run_cc(risk_level=settings['risk_level'],
                   delta=settings['delta'], 

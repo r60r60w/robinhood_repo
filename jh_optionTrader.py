@@ -130,27 +130,27 @@ class OptionTrader():
         # for symbol in self.symbol_list:
         #     stock_threads[symbol] = StockAlgorithmThread(symbol, trading_signals[symbol], generate_plot=False)
         #     stock_threads[symbol].start()
-        #try: 
-        while True:
-            if is_market_open_now() or self.mode == 'test':
-                logger.info('******** New iteration started ********')
-                logger.info(f'Important parameters: mode = {self.mode}, delta = {delta}, risk level = {risk_level}.')
-                logger.info(f'All current option positions:')
-                self.positions.df.reset_index(drop=True, inplace=True)
-                self.positions.print_all_positions()
-                if not only_manage_existing:
-                    self.place_short_calls_logic()      
-                self.manage_short_calls_logic()
-            else:
-                logger.info('Market is closed now.')
+        try: 
+            while True:
+                if is_market_open_now() or self.mode == 'test':
+                    logger.info('******** New iteration started ********')
+                    logger.info(f'Important parameters: mode = {self.mode}, delta = {delta}, risk level = {risk_level}.')
+                    logger.info(f'All current option positions:')
+                    self.positions.df.reset_index(drop=True, inplace=True)
+                    self.positions.print_all_positions()
+                    if not only_manage_existing:
+                        self.place_short_calls_logic()      
+                    self.manage_short_calls_logic()
+                    minutes = random.randint(3, 8)
+                else:
+                    logger.info('Market is closed now.')       
+                    minutes = random.randint(20, 30)      
+                    
+                logger.info(f'Wait for {minutes} min before starting new iteration.')
+                custom_sleep_with_progress(minutes*60) if self.mode != 'test' else tracked_sleep(0)
                 
-                
-            minutes = random.randint(2, 9)
-            logger.info(f'Wait for {minutes} min before starting new iteration.')
-            custom_sleep_with_progress(minutes*60) if self.mode != 'test' else tracked_sleep(0)
-                
-        #except KeyboardInterrupt:
-        #    logger.info("Keyboard Interrupt Received: Stopping the program...")
+        except KeyboardInterrupt:
+           logger.info("Keyboard Interrupt Received: Stopping the program...")
             
 
         

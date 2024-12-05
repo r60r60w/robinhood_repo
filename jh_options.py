@@ -240,16 +240,27 @@ class Option():
             
         # find options whose strike is greater than existing strike and price is greater than exisitng price.
         matchingOptions = []
+        strike_diff_old = 10000 # A large number
+        option_rh_tmp = {}
         for option_rh in options_rh:
             mark_price = float(option_rh.get('adjusted_mark_price', 0))
             strike = float(option_rh.get('strike_price', 0))
             if mark_price > self.get_mark_price() and strike >= self.strike:
                 option = Option(self.symbol, option_rh['expiration_date'], float(option_rh['strike_price']), option_rh['type'])
                 matchingOptions.append(option)    
+            
+            if strike > self.strike:
+                strike_diff = strike - self.strike
+                if strike_diff < strike_diff_old:
+                    strike_diff_old = strike_diff
+                    option_rh_tmp = option_rh
+            
         
         if len(matchingOptions) == 0:
-            logger.info('No mathcing option found for rolling.')
-            return None
+            logger.info('No mathcing option found for rolling with credit.')
+            logger.info('Instead, return the option with the smallest strike price greater than the current strike price.')
+            option_to_roll = Option(self.symbol, option_rh_tmp['expiration_date'], float(option_rh_tmp['strike_price']), option_rh_tmp['type'])
+            return option_to_roll
         
         matchingOptions = sorted(matchingOptions, key=lambda x: x.strike, reverse=True)
         

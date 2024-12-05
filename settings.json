@@ -1,8 +1,8 @@
 {
     "mode": "normal",
     "symbol_list": [],
-    "delta": 0.25,
-    "risk_level": "medium",
+    "delta": 0.2,
+    "risk_level": "high",
     "only_manage_existing": false,
     "email_address": "r60r60w@gmail.com"
 }
