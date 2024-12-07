@@ -5,6 +5,7 @@ import logging
 import yagmail
 import time
 import json
+import pyotp
 
 from tqdm import tqdm
 
@@ -45,16 +46,20 @@ class EmptyListError(Exception):
 
 def login(days):
     time_logged_in = 60*60*24*days
+    totp  = pyotp.TOTP("UINNYBG5F3URH4T6").now()
+    print("Current OTP:", totp)
     rh.authentication.login(username=config.USERNAME,
                             password=config.PASSWORD,
                             expiresIn=time_logged_in,
                             scope='internal',
-                            by_sms=True,
+                            by_sms=False,
+                            mfa_code=totp,
                             store_session=False)
     profile = rh.profiles.load_user_profile()
     logger.info(f'******** Successfully logged in to Robinhood account for {profile['first_name']} {profile['last_name']} ********')
 
 def logout():
+    logger.info('Logging out of Robinhood account...')
     rh.authentication.logout()
 
 def is_market_open_on_date(date_dt):

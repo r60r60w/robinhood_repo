@@ -260,6 +260,10 @@ class Option():
             logger.info('No mathcing option found for rolling with credit.')
             logger.info('Instead, return the option with the smallest strike price greater than the current strike price.')
             option_to_roll = Option(self.symbol, option_rh_tmp['expiration_date'], float(option_rh_tmp['strike_price']), option_rh_tmp['type'])
+            mark_price = float(option_rh.get('adjusted_mark_price', 0))
+            credit = mark_price - self.get_mark_price()
+            logger.info(f'Option to roll: exp = {option_to_roll.exp}, strike = {option_to_roll.strike}, type = {option_to_roll.type}')
+            logger.info(f'Estimated credit: {credit}')
             return option_to_roll
         
         matchingOptions = sorted(matchingOptions, key=lambda x: x.strike, reverse=True)

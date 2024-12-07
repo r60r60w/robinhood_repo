@@ -130,6 +130,10 @@ class OptionTrader():
         # for symbol in self.symbol_list:
         #     stock_threads[symbol] = StockAlgorithmThread(symbol, trading_signals[symbol], generate_plot=False)
         #     stock_threads[symbol].start()
+        
+        logger.info(f'All current option positions:')
+        self.positions.df.reset_index(drop=True, inplace=True)
+        self.positions.print_all_positions()
         try: 
             while True:
                 if is_market_open_now() or self.mode == 'test':
@@ -151,6 +155,7 @@ class OptionTrader():
                 
         except KeyboardInterrupt:
            logger.info("Keyboard Interrupt Received: Stopping the program...")
+           logout()
             
 
         
